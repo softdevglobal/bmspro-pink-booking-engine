@@ -23,7 +23,7 @@ export async function GET(req: NextRequest) {
     }
 
     const db = adminDb();
-    let query = db.collection("notifications");
+    let query: any = db.collection("notifications");
 
     // Build query based on available parameters
     if (customerUid) {
@@ -39,7 +39,7 @@ export async function GET(req: NextRequest) {
       .limit(limitCount)
       .get();
 
-    const notifications = snapshot.docs.map((doc) => {
+    const notifications = snapshot.docs.map((doc: any) => {
       const data = doc.data();
       return {
         id: doc.id,
