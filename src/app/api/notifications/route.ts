@@ -13,7 +13,7 @@ export async function GET(req: NextRequest) {
     const customerEmail = searchParams.get("email");
     const customerPhone = searchParams.get("phone");
     const customerUid = searchParams.get("uid");
-    const limitCount = parseInt(searchParams.get("limit") || "50");
+    const limitCount = parseInt(searchParams.get("limit") || "200");
 
     if (!customerEmail && !customerPhone && !customerUid) {
       return NextResponse.json(

@@ -42,6 +42,8 @@ export default function NotificationPanel({
       } else if (customerPhone) {
         params.set("phone", customerPhone);
       }
+      // Fetch up to 200 notifications
+      params.set("limit", "200");
 
       const response = await fetch(`/api/notifications?${params.toString()}`);
       const data = await response.json();
