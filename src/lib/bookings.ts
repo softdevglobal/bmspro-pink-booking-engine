@@ -1,0 +1,168 @@
+import { db } from "@/lib/firebase";
+import { addDoc, collection, serverTimestamp, query, where, onSnapshot, DocumentData, getDocs } from "firebase/firestore";
+import type { BookingStatus } from "./bookingTypes";
+
+export type BookingInput = {
+  client: string;
+  clientEmail?: string;
+  clientPhone?: string;
+  notes?: string;
+  serviceId: string | number;
+  serviceName?: string;
+  staffId?: string | null; // Optional - allows booking without specific staff
+  staffName?: string;
+  branchId: string;
+  branchName?: string;
+  date: string; // YYYY-MM-DD
+  time: string; // HH:mm
+  duration: number; // minutes
+  status?: BookingStatus;
+  price: number;
+  ownerUid: string; // Required for booking engine
+};
+
+export async function createBooking(input: BookingInput): Promise<{ id: string }> {
+  const payload = {
+    ownerUid: input.ownerUid,
+    client: input.client,
+    clientEmail: input.clientEmail || null,
+    clientPhone: input.clientPhone || null,
+    notes: input.notes || null,
+    serviceId: typeof input.serviceId === "number" ? input.serviceId : String(input.serviceId),
+    serviceName: input.serviceName || null,
+    staffId: input.staffId || null,
+    staffName: input.staffName || null,
+    branchId: String(input.branchId),
+    branchName: input.branchName || null,
+    date: String(input.date),
+    time: String(input.time),
+    duration: Number(input.duration) || 0,
+    status: input.status || "Pending",
+    price: Number(input.price) || 0,
+    createdAt: serverTimestamp(),
+    updatedAt: serverTimestamp(),
+  };
+  
+  // Save to bookingRequests collection instead of bookings
+  const ref = await addDoc(collection(db, "bookingRequests"), payload as any);
+  return { id: ref.id };
+}
+
+/**
+ * Fetch bookings for a specific owner and date
+ * Checks both "bookings" and "bookingRequests" collections
+ */
+export async function fetchBookingsForOwnerAndDate(ownerUid: string, date: string) {
+  try {
+    // Fetch from both collections
+    const q1 = query(
+      collection(db, "bookings"),
+      where("ownerUid", "==", ownerUid),
+      where("date", "==", date)
+    );
+    const q2 = query(
+      collection(db, "bookingRequests"),
+      where("ownerUid", "==", ownerUid),
+      where("date", "==", date)
+    );
+
+    const [snapshot1, snapshot2] = await Promise.all([
+      getDocs(q1).catch(() => ({ docs: [] })),
+      getDocs(q2).catch(() => ({ docs: [] }))
+    ]);
+
+    // Merge results from both collections
+    const bookings = snapshot1.docs.map((doc) => ({ id: doc.id, ...doc.data() }));
+    const bookingRequests = snapshot2.docs.map((doc) => ({ id: doc.id, ...doc.data() }));
+    
+    // Remove duplicates by id
+    const merged = [...bookings, ...bookingRequests];
+    const unique = merged.filter((item, index, self) => 
+      index === self.findIndex((t) => t.id === item.id)
+    );
+    
+    return unique;
+  } catch (error) {
+    console.error("Error fetching bookings:", error);
+    return [];
+  }
+}
+
+/**
+ * Subscribe to real-time bookings updates for an owner and date
+ * Checks both "bookings" and "bookingRequests" collections to prevent double-booking
+ */
+export function subscribeBookingsForOwnerAndDate(
+  ownerUid: string,
+  date: string,
+  onChange: (rows: Array<{ id: string } & DocumentData>) => void
+) {
+  let bookingsData: Array<{ id: string } & DocumentData> = [];
+  let bookingRequestsData: Array<{ id: string } & DocumentData> = [];
+
+  const mergeAndNotify = () => {
+    // Merge both collections, removing duplicates by id
+    const merged = [...bookingsData, ...bookingRequestsData];
+    const unique = merged.filter((item, index, self) => 
+      index === self.findIndex((t) => t.id === item.id)
+    );
+    onChange(unique);
+  };
+
+  // Subscribe to bookings collection
+  const q1 = query(
+    collection(db, "bookings"),
+    where("ownerUid", "==", ownerUid),
+    where("date", "==", date)
+  );
+  const unsub1 = onSnapshot(
+    q1,
+    (snap) => {
+      bookingsData = snap.docs.map((d) => ({ id: d.id, ...(d.data() as DocumentData) }));
+      mergeAndNotify();
+    },
+    (error) => {
+      if (error.code === "permission-denied") {
+        console.warn("Permission denied for bookings query.");
+        bookingsData = [];
+        mergeAndNotify();
+      } else {
+        console.error("Error in bookings snapshot:", error);
+        bookingsData = [];
+        mergeAndNotify();
+      }
+    }
+  );
+
+  // Subscribe to bookingRequests collection
+  const q2 = query(
+    collection(db, "bookingRequests"),
+    where("ownerUid", "==", ownerUid),
+    where("date", "==", date)
+  );
+  const unsub2 = onSnapshot(
+    q2,
+    (snap) => {
+      bookingRequestsData = snap.docs.map((d) => ({ id: d.id, ...(d.data() as DocumentData) }));
+      mergeAndNotify();
+    },
+    (error) => {
+      if (error.code === "permission-denied") {
+        console.warn("Permission denied for bookingRequests query.");
+        bookingRequestsData = [];
+        mergeAndNotify();
+      } else {
+        console.error("Error in bookingRequests snapshot:", error);
+        bookingRequestsData = [];
+        mergeAndNotify();
+      }
+    }
+  );
+
+  // Return unsubscribe function that cleans up both subscriptions
+  return () => {
+    unsub1();
+    unsub2();
+  };
+}
+
