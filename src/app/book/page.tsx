@@ -9,8 +9,7 @@ function BookPageContent() {
   const DEFAULT_OWNER_UID = "0Z0k6PleLzLHXrYG8UdUKvp7DUt2";
   const ownerUid = searchParams.get("ownerUid") || DEFAULT_OWNER_UID;
 
-  // Booking wizard state
-  const [bkStep, setBkStep] = useState<1 | 2 | 3>(1);
+  // Booking state
   const [bkBranchId, setBkBranchId] = useState<string | null>(null);
   const [bkServiceId, setBkServiceId] = useState<number | null>(null);
   const [bkStaffId, setBkStaffId] = useState<string | null>(null);
@@ -28,6 +27,7 @@ function BookPageContent() {
   const [showSuccess, setShowSuccess] = useState<boolean>(false);
 
   // Real data from Firestore
+  const [salonName, setSalonName] = useState<string>("Salon");
   const [branches, setBranches] = useState<Array<{ id: string; name: string; address?: string }>>([]);
   const [servicesList, setServicesList] = useState<Array<{ id: string | number; name: string; price?: number; duration?: number; icon?: string; branches?: string[]; staffIds?: string[] }>>([]);
   const [staffList, setStaffList] = useState<Array<{ id: string; name: string; role?: string; status?: string; avatar?: string; branchId?: string; branch?: string }>>([]);
@@ -59,6 +59,18 @@ function BookPageContent() {
         } catch (testError) {
           console.error("API test error:", testError);
           throw new Error("API routes are not working. Please check server logs.");
+        }
+        
+        // Fetch salon owner information first
+        const ownerRes = await fetch(`/api/owner?ownerUid=${encodeURIComponent(ownerUid)}`);
+        if (ownerRes.ok) {
+          const ownerData = await ownerRes.json();
+          const salonNameFromOwner = ownerData.owner?.salonName || ownerData.owner?.businessName || ownerData.owner?.name || "Salon";
+          setSalonName(salonNameFromOwner);
+          console.log("Salon name set from owner:", salonNameFromOwner);
+        } else {
+          console.warn("Failed to fetch owner info, using default");
+          setSalonName("Salon");
         }
         
         // Fetch branches
@@ -157,8 +169,7 @@ function BookPageContent() {
     return () => unsub();
   }, [ownerUid, bkDate]);
 
-  const resetWizard = () => {
-    setBkStep(1);
+  const resetBooking = () => {
     setBkBranchId(null);
     setBkServiceId(null);
     setBkStaffId(null);
@@ -295,7 +306,7 @@ function BookPageContent() {
       
       setShowSuccess(true);
       setTimeout(() => {
-        resetWizard();
+        resetBooking();
         setShowSuccess(false);
       }, 3000);
     } catch (error) {
@@ -354,16 +365,16 @@ function BookPageContent() {
             <h2 className="text-2xl font-bold text-slate-800 mb-2">Unable to Load Data</h2>
             <p className="text-slate-600 mb-4 font-mono text-sm break-words">{error}</p>
             {isFirebaseError && (
-              <div className="bg-slate-50 rounded-lg p-4 text-left text-sm">
+            <div className="bg-slate-50 rounded-lg p-4 text-left text-sm">
                 <p className="font-semibold mb-2">To fix this issue, check your <code className="bg-slate-200 px-1 rounded">.env</code> file has:</p>
-                <div className="bg-slate-800 text-green-400 p-3 rounded text-xs overflow-x-auto mb-3">
-                  <div className="mb-1">FIREBASE_PROJECT_ID=bmspro-pink</div>
-                  <div className="mb-1">FIREBASE_CLIENT_EMAIL=firebase-adminsdk-xxxxx@bmspro-pink.iam.gserviceaccount.com</div>
-                  <div>FIREBASE_PRIVATE_KEY="-----BEGIN PRIVATE KEY-----\\n..."</div>
-                </div>
+              <div className="bg-slate-800 text-green-400 p-3 rounded text-xs overflow-x-auto mb-3">
+                <div className="mb-1">FIREBASE_PROJECT_ID=bmspro-pink</div>
+                <div className="mb-1">FIREBASE_CLIENT_EMAIL=firebase-adminsdk-xxxxx@bmspro-pink.iam.gserviceaccount.com</div>
+                <div>FIREBASE_PRIVATE_KEY="-----BEGIN PRIVATE KEY-----\\n..."</div>
+              </div>
                 <p className="mt-2 text-xs text-slate-500">Owner UID: <code className="bg-slate-200 px-1 rounded">{ownerUid}</code></p>
                 <p className="mt-2 text-xs text-slate-500 font-semibold">⚠️ Make sure to restart your dev server after updating .env file!</p>
-              </div>
+            </div>
             )}
             {!isFirebaseError && (
               <div className="bg-blue-50 rounded-lg p-4 text-left text-sm">
@@ -379,247 +390,345 @@ function BookPageContent() {
   }
 
   return (
-    <div className="min-h-screen bg-gradient-to-br from-pink-50 via-purple-50 to-indigo-50 py-8 px-4">
-      <div className="max-w-4xl mx-auto">
-        {/* Header */}
-        <div className="text-center mb-8">
-          <h1 className="text-4xl font-bold text-slate-800 mb-2">Book Your Appointment</h1>
-          <p className="text-slate-600">Select your service, time, and complete your booking</p>
+    <div className="min-h-screen bg-gradient-to-br from-pink-50 via-purple-50 to-indigo-50">
+      {/* Creative Header with Salon Name */}
+      <div className="relative overflow-hidden bg-indigo-900">
+        {/* Creative Pattern Background */}
+        <div className="absolute inset-0 opacity-10">
+          <div className="absolute inset-0" style={{
+            backgroundImage: `repeating-linear-gradient(45deg, transparent, transparent 10px, rgba(255,255,255,0.05) 10px, rgba(255,255,255,0.05) 20px)`,
+          }}></div>
+          <div className="absolute inset-0" style={{
+            backgroundImage: `repeating-linear-gradient(-45deg, transparent, transparent 10px, rgba(255,255,255,0.03) 10px, rgba(255,255,255,0.03) 20px)`,
+          }}></div>
         </div>
 
-        {/* Booking Wizard */}
-        <div className="bg-white rounded-2xl shadow-xl overflow-hidden">
-          {/* Stepper */}
-          <div className="px-6 pt-6 pb-4 bg-slate-50 border-b border-slate-200">
-            <div className="flex items-center justify-between max-w-2xl mx-auto">
-              {[
-                { num: 1, label: "Branch & Service" },
-                { num: 2, label: "Date, Time & Staff" },
-                { num: 3, label: "Confirm Details" }
-              ].map((step, i) => (
-                <div key={step.num} className="flex-1 flex items-center">
-                  <div className="flex flex-col items-center gap-1">
-                    <div className={`w-10 h-10 sm:w-12 sm:h-12 rounded-full flex items-center justify-center text-sm font-bold transition-all ${bkStep >= step.num ? "bg-gradient-to-br from-pink-600 to-purple-600 text-white shadow-lg" : "bg-white border-2 border-slate-300 text-slate-500"}`}>
-                      {bkStep > step.num ? <i className="fas fa-check" /> : step.num}
+        {/* Decorative geometric shapes */}
+        <div className="absolute top-0 right-0 w-64 h-64 bg-pink-500 opacity-20 rounded-full -mr-32 -mt-32"></div>
+        <div className="absolute bottom-0 left-0 w-96 h-96 bg-purple-500 opacity-15 rounded-full -ml-48 -mb-48"></div>
+        <div className="absolute top-1/2 right-1/4 w-32 h-32 bg-rose-400 opacity-25 rotate-45"></div>
+        
+        {/* Decorative corner elements */}
+        <div className="absolute top-0 left-0 w-24 h-24 border-t-4 border-l-4 border-white/20"></div>
+        <div className="absolute top-0 right-0 w-24 h-24 border-t-4 border-r-4 border-white/20"></div>
+        <div className="absolute bottom-0 left-0 w-24 h-24 border-b-4 border-l-4 border-white/20"></div>
+        <div className="absolute bottom-0 right-0 w-24 h-24 border-b-4 border-r-4 border-white/20"></div>
+        
+        <div className="relative max-w-7xl mx-auto px-4 py-20 sm:py-24">
+          <div className="text-center relative z-10">
+            {/* Top decorative line */}
+            <div className="flex items-center justify-center mb-8">
+              <div className="h-0.5 w-20 bg-white/40"></div>
+              <div className="mx-4 w-3 h-3 bg-white/60 rotate-45"></div>
+              <div className="h-0.5 w-20 bg-white/40"></div>
                     </div>
-                    <span className="text-[10px] text-slate-600 font-semibold hidden sm:block text-center whitespace-nowrap">{step.label}</span>
+            
+            {/* Salon name with creative styling */}
+            <div className="mb-8">
+              <div className="inline-block px-6 py-2 mb-6 bg-white/10 backdrop-blur-sm border border-white/20 rounded-full">
+                <span className="text-white/90 text-sm font-semibold tracking-wider uppercase">Welcome To</span>
                   </div>
-                  {i < 2 && <div className={`h-1 flex-1 mx-1 sm:mx-2 rounded transition-all ${bkStep > step.num ? "bg-gradient-to-r from-pink-500 to-purple-500" : "bg-slate-300"}`} />}
-                </div>
-              ))}
+              <h1 className="text-6xl sm:text-7xl md:text-8xl lg:text-9xl font-black mb-4 tracking-tighter">
+                <span className="block text-white [text-shadow:_4px_4px_0_rgb(0_0_0_/_40%)]">
+                  {salonName.split(' ').map((word, i) => (
+                    <span key={i} className="inline-block mr-4 relative">
+                      <span className="relative z-10">{word}</span>
+                      <span className="absolute inset-0 text-pink-400 blur-sm opacity-50 -z-0">{word}</span>
+                    </span>
+                  ))}
+                </span>
+              </h1>
+              
+              {/* Decorative underline */}
+              <div className="flex items-center justify-center gap-3 mt-6">
+                <div className="w-8 h-1 bg-pink-400"></div>
+                <div className="w-2 h-2 bg-pink-400 rotate-45"></div>
+                <div className="w-16 h-1 bg-pink-400"></div>
+                <div className="w-2 h-2 bg-pink-400 rotate-45"></div>
+                <div className="w-8 h-1 bg-pink-400"></div>
+              </div>
+            </div>
+
+            {/* Subtitle */}
+            <p className="text-xl sm:text-2xl md:text-3xl text-white font-light tracking-wider mb-10 uppercase">
+              Book Your Appointment
+            </p>
+            
+            {/* Bottom decorative line */}
+            <div className="flex items-center justify-center">
+              <div className="h-0.5 w-16 bg-white/40"></div>
+              <div className="mx-3 w-2 h-2 bg-white/60 rounded-full"></div>
+              <div className="h-0.5 w-16 bg-white/40"></div>
             </div>
           </div>
+        </div>
+        
+        {/* Bottom transition with pattern */}
+        <div className="absolute bottom-0 left-0 right-0 h-20 bg-pink-50">
+          <div className="absolute top-0 left-0 right-0 h-1 bg-indigo-900"></div>
+          <div className="absolute top-1 left-0 right-0 h-1 bg-pink-400"></div>
+        </div>
+      </div>
 
-          {/* Content */}
-          <div className="p-6">
-            {/* Step 1 - Branch & Service */}
-            {bkStep === 1 && (
-              <div className="space-y-6">
-                <div>
-                  <div className="font-bold text-slate-700 mb-3 flex items-center gap-2">
-                    <i className="fas fa-map-marker-alt text-pink-600" />
-                    Select Location
-                  </div>
-                  <div className="grid grid-cols-1 sm:grid-cols-2 gap-3">
-                    {branches.length === 0 ? (
-                      <div className="col-span-2 bg-slate-50 border-2 border-dashed border-slate-300 rounded-lg p-8 text-center">
-                        <i className="fas fa-store-slash text-4xl text-slate-300 mb-2 block" />
-                        <p className="text-slate-500 font-medium text-sm">No branches available</p>
-                      </div>
-                    ) : (
-                      branches.map((br: any) => {
-                      const selected = bkBranchId === br.id;
-                      return (
-                        <button
-                          key={br.id}
-                          onClick={() => {
-                            setBkBranchId(br.id);
-                            setBkServiceId(null);
-                            setBkStaffId(null);
-                            setBkDate(null);
-                            setBkTime(null);
-                          }}
-                          className={`text-left border rounded-lg p-3 hover:shadow-md transition ${selected ? "border-pink-400 bg-pink-50 shadow-md" : "border-slate-200 bg-white"}`}
-                        >
-                          <div className="flex items-center gap-2.5">
-                            <div className={`w-10 h-10 rounded-lg ${selected ? "bg-pink-100" : "bg-slate-100"} flex items-center justify-center shrink-0`}>
-                              <i className={`fas fa-store ${selected ? "text-pink-600" : "text-slate-400"}`} />
-                            </div>
-                            <div className="flex-1 min-w-0">
-                              <div className="font-semibold text-slate-800 truncate text-sm">{br.name}</div>
-                              <div className="text-xs text-slate-500 truncate">{br.address}</div>
-                            </div>
-                            {selected && <i className="fas fa-check-circle text-pink-600 shrink-0" />}
-                          </div>
-                        </button>
-                      );
-                      })
-                    )}
-                  </div>
-                </div>
-
-                <div className={!bkBranchId ? "opacity-50 pointer-events-none" : ""}>
-                  <div className="font-bold text-slate-700 mb-3 flex items-center gap-2">
-                    <i className="fas fa-concierge-bell text-purple-600" />
-                    Select Service {!bkBranchId && <span className="text-xs font-normal text-slate-500">(Select branch first)</span>}
-                  </div>
-                  {!bkBranchId ? (
-                    <div className="bg-slate-50 border-2 border-dashed border-slate-300 rounded-lg p-8 text-center">
-                      <i className="fas fa-map-marker-alt text-4xl text-slate-300 mb-2 block" />
-                      <p className="text-slate-500 font-medium text-sm">Select a branch first</p>
+      <div className="max-w-7xl mx-auto px-4 py-8 -mt-6 relative z-10">
+        {/* Single Page Booking Form */}
+        <div className="grid grid-cols-1 lg:grid-cols-2 gap-10 lg:gap-16">
+              {/* Left Column: Selection & Scheduling */}
+              <div className="space-y-8">
+                {/* Branch Selection */}
+                <div className="p-6 border-4 border-pink-500 bg-white shadow-lg">
+                  <div className="font-bold text-slate-800 mb-4 flex items-center gap-3 text-lg">
+                    <div className="w-12 h-12 bg-pink-500 flex items-center justify-center text-white border-2 border-pink-600">
+                      <i className="fas fa-map-marker-alt text-base"></i>
                     </div>
-                  ) : servicesList.length === 0 ? (
-                    <div className="bg-slate-50 border-2 border-dashed border-slate-300 rounded-lg p-8 text-center">
-                      <i className="fas fa-concierge-bell text-4xl text-slate-300 mb-2 block" />
-                      <p className="text-slate-500 font-medium text-sm">No services available for this branch</p>
-                    </div>
-                  ) : (
-                    <div className="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-3 gap-3">
-                      {servicesList
-                        .filter((srv: any) => {
-                          // Show service if:
-                          // 1. Service has no branches array (available at all branches), OR
-                          // 2. Service's branches array is empty (available at all branches), OR
-                          // 3. Service's branches array includes the selected branch ID
-                          if (!srv.branches || srv.branches.length === 0) return true;
-                          return srv.branches.includes(String(bkBranchId));
-                        })
-                        .map((srv: any) => {
-                          const selected = String(bkServiceId) === String(srv.id);
+                    <span className="uppercase tracking-wide">Select Location</span>
+                  </div>
+                    <div className="grid grid-cols-1 gap-4">
+                      {branches.length === 0 ? (
+                        <div className="border-4 border-dashed border-pink-300 p-8 text-center relative">
+                          <div className="absolute top-2 right-2 w-4 h-4 border-t-2 border-r-2 border-pink-300"></div>
+                          <div className="absolute bottom-2 left-2 w-4 h-4 border-b-2 border-l-2 border-pink-300"></div>
+                          <i className="fas fa-store-slash text-4xl text-pink-300 mb-2 block" />
+                          <p className="text-slate-500 font-medium">No branches available</p>
+                        </div>
+                      ) : (
+                        branches.map((br: any) => {
+                          const selected = bkBranchId === br.id;
                           return (
                             <button
-                              key={srv.id}
+                              key={br.id}
                               onClick={() => {
-                                setBkServiceId(srv.id);
+                                setBkBranchId(br.id);
+                                setBkServiceId(null);
                                 setBkStaffId(null);
                                 setBkDate(null);
                                 setBkTime(null);
                               }}
-                              className={`text-left border rounded-lg p-3 hover:shadow-md transition ${selected ? "border-purple-400 bg-purple-50 shadow-md" : "border-slate-200 bg-white"}`}
+                              className={`text-left border-4 p-5 hover:shadow-xl transition-all relative ${
+                                selected 
+                                  ? "border-pink-500 bg-pink-50 shadow-lg" 
+                                  : "border-slate-300 bg-white hover:border-pink-400"
+                              }`}
                             >
-                              <div className="flex items-center gap-2.5">
-                                <div className={`w-10 h-10 rounded-lg ${selected ? "bg-purple-100" : "bg-slate-100"} flex items-center justify-center shrink-0 overflow-hidden`}>
-                                  {srv.imageUrl ? (
-                                    <img src={srv.imageUrl} alt={srv.name} className="w-full h-full object-cover" />
-                                  ) : (
-                                    <i className={`fas fa-cut ${selected ? "text-purple-600" : "text-slate-400"}`} />
-                                  )}
+                              <div className="flex items-center gap-4">
+                                <div className={`w-16 h-16 ${selected ? "bg-pink-500" : "bg-slate-200"} flex items-center justify-center shrink-0 transition-all`}>
+                                  <i className={`fas fa-store text-xl ${selected ? "text-white" : "text-slate-500"}`} />
                                 </div>
                                 <div className="flex-1 min-w-0">
-                                  <div className="font-semibold text-slate-800 truncate text-sm">{srv.name}</div>
-                                  <div className="text-xs text-slate-500">{srv.duration} min • ${srv.price}</div>
+                                  <div className={`font-bold text-slate-800 truncate text-lg ${selected ? "text-pink-700" : ""}`}>{br.name}</div>
+                                  <div className="text-xs text-slate-500 truncate mt-1 flex items-center gap-1">
+                                    <i className="fas fa-map-pin text-pink-400"></i>
+                                    {br.address}
+                                  </div>
                                 </div>
-                                {selected && <i className="fas fa-check-circle text-purple-600 shrink-0" />}
+                                {selected && (
+                                  <div className="w-10 h-10 bg-pink-500 flex items-center justify-center text-white">
+                                    <i className="fas fa-check"></i>
+                                  </div>
+                                )}
                               </div>
                             </button>
                           );
+                        })
+                      )}
+                    </div>
+                </div>
+
+                {/* Service Selection */}
+                <div className={`p-6 border-4 border-purple-500 bg-white shadow-lg ${!bkBranchId ? "opacity-50 pointer-events-none" : ""}`}>
+                  <div className="font-bold text-slate-800 mb-5 flex items-center gap-3 text-xl">
+                    <div className="w-12 h-12 bg-purple-500 flex items-center justify-center text-white border-2 border-purple-600">
+                      <i className="fas fa-concierge-bell text-base"></i>
+                    </div>
+                    <span className="uppercase tracking-wide">Select Service</span>
+                  </div>
+                  {!bkBranchId ? (
+                      <div className="border-4 border-dashed border-purple-300 p-10 text-center relative">
+                        <div className="absolute top-2 right-2 w-4 h-4 border-t-2 border-r-2 border-purple-300"></div>
+                        <div className="absolute bottom-2 left-2 w-4 h-4 border-b-2 border-l-2 border-purple-300"></div>
+                        <div className="w-20 h-20 border-2 border-purple-300 mx-auto mb-4 flex items-center justify-center">
+                          <i className="fas fa-map-marker-alt text-4xl text-purple-400"></i>
+                        </div>
+                        <p className="text-slate-600 font-semibold">Select a branch first</p>
+                    </div>
+                  ) : servicesList.length === 0 ? (
+                      <div className="border-4 border-dashed border-purple-300 p-10 text-center relative">
+                        <div className="absolute top-2 right-2 w-4 h-4 border-t-2 border-r-2 border-purple-300"></div>
+                        <div className="absolute bottom-2 left-2 w-4 h-4 border-b-2 border-l-2 border-purple-300"></div>
+                        <div className="w-20 h-20 border-2 border-purple-300 mx-auto mb-4 flex items-center justify-center">
+                          <i className="fas fa-concierge-bell text-4xl text-purple-400"></i>
+                        </div>
+                        <p className="text-slate-600 font-semibold">No services available</p>
+                    </div>
+                  ) : (
+                      <div className="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-3 gap-4">
+                      {servicesList
+                        .filter((srv: any) => {
+                          if (!srv.branches || srv.branches.length === 0) return true;
+                          return srv.branches.includes(String(bkBranchId));
+                        })
+                          .map((srv: any, index: number) => {
+                          const selected = String(bkServiceId) === String(srv.id);
+                            return (
+                              <button
+                                key={srv.id}
+                                onClick={() => {
+                                  setBkServiceId(srv.id);
+                                  setBkStaffId(null);
+                                  setBkDate(null);
+                                  setBkTime(null);
+                                }}
+                                className={`group relative border-4 p-3 sm:p-4 md:p-5 hover:shadow-xl transition-all w-full ${
+                                  selected 
+                                    ? "border-purple-500 bg-purple-50 shadow-lg" 
+                                    : "border-slate-300 bg-white hover:border-purple-400"
+                                }`}
+                              >
+                                <div className="relative flex flex-col items-center text-center gap-2 sm:gap-3">
+                                  <div className={`w-full max-w-[120px] h-[120px] sm:max-w-[140px] sm:h-[140px] md:max-w-[160px] md:h-[160px] lg:max-w-[180px] lg:h-[180px] aspect-square ${selected ? "bg-purple-500" : "bg-slate-200"} flex items-center justify-center shrink-0 overflow-hidden transition-all rounded-lg`}>
+                                    {srv.imageUrl ? (
+                                      <img src={srv.imageUrl} alt={srv.name} className="w-full h-full object-cover" />
+                                    ) : (
+                                      <i className={`fas fa-cut text-3xl sm:text-4xl md:text-5xl lg:text-6xl ${selected ? "text-white" : "text-slate-500"}`} />
+                                    )}
+                                  </div>
+                                  <div className="flex-1 w-full">
+                                    <div className={`font-bold text-slate-800 text-sm sm:text-base mb-1 sm:mb-2 ${selected ? "text-purple-700" : ""}`}>
+                                      {srv.name}
+                                    </div>
+                                    <div className="flex items-center justify-center gap-2 text-xs flex-wrap">
+                                      <span className={`px-2 py-1 border-2 ${selected ? "bg-purple-200 border-purple-300 text-purple-700" : "bg-slate-100 border-slate-200 text-slate-600"}`}>
+                                        <i className="fas fa-clock mr-1"></i>
+                                        {srv.duration} min
+                                      </span>
+                                      <span className={`px-2 py-1 border-2 font-bold ${selected ? "bg-pink-500 border-pink-600 text-white" : "bg-purple-100 border-purple-200 text-purple-700"}`}>
+                                        <i className="fas fa-dollar-sign mr-1"></i>
+                                        {srv.price}
+                                      </span>
+                                    </div>
+                                  </div>
+                                  {selected && (
+                                    <div className="absolute -top-2 -right-2 w-6 h-6 sm:w-8 sm:h-8 bg-purple-500 border-2 border-purple-600 flex items-center justify-center text-white rounded-full">
+                                      <i className="fas fa-check text-xs sm:text-sm"></i>
+                                    </div>
+                                  )}
+                                </div>
+                              </button>
+                            );
                         })}
                     </div>
                   )}
                 </div>
 
-                <div className="flex justify-end pt-2 border-t border-slate-200">
-                  <button
-                    disabled={!bkBranchId || !bkServiceId}
-                    onClick={() => setBkStep(2)}
-                    className={`px-5 py-2 rounded-lg text-white font-semibold ${bkBranchId && bkServiceId ? "bg-gradient-to-r from-pink-600 to-purple-600 hover:shadow-lg" : "bg-slate-300 cursor-not-allowed"}`}
-                  >
-                    Continue to Date & Time
-                  </button>
-                </div>
-              </div>
-            )}
-
-            {/* Step 2 - Date, Time & Staff */}
-            {bkStep === 2 && (
-              <div>
-                <div className="grid grid-cols-1 lg:grid-cols-2 gap-4">
-                  <div className="space-y-3">
-                    <div>
-                      <div className="flex items-center justify-between mb-2">
-                        <div className="font-bold text-slate-700 text-sm">Pick a Date</div>
-                        <div className="flex items-center gap-1">
-                          <button onClick={goPrevMonth} className="w-7 h-7 rounded bg-slate-100 hover:bg-slate-200 text-slate-700 text-xs">
+                {/* Date Selection */}
+                <div className="p-6 border-4 border-indigo-500 bg-white shadow-lg">
+                  <div className="flex items-center justify-between mb-4">
+                    <div className="font-bold text-slate-800 flex items-center gap-3 text-lg">
+                      <div className="w-12 h-12 bg-indigo-500 flex items-center justify-center text-white border-2 border-indigo-600">
+                        <i className="fas fa-calendar text-base"></i>
+                      </div>
+                      <span className="uppercase tracking-wide">Pick a Date</span>
+                    </div>
+                      <div className="flex items-center gap-2">
+                        <button onClick={goPrevMonth} className="w-10 h-10 border-2 border-indigo-300 hover:bg-indigo-100 hover:border-indigo-500 text-slate-700 text-sm transition-all transform hover:scale-110">
                             <i className="fas fa-chevron-left" />
                           </button>
-                          <div className="text-xs font-semibold text-slate-800 px-2">{monthName}</div>
-                          <button onClick={goNextMonth} className="w-7 h-7 rounded bg-slate-100 hover:bg-slate-200 text-slate-700 text-xs">
+                        <div className="text-sm font-bold text-slate-800 px-4 min-w-[140px] text-center border-2 border-indigo-300 py-2">{monthName}</div>
+                        <button onClick={goNextMonth} className="w-10 h-10 border-2 border-indigo-300 hover:bg-indigo-100 hover:border-indigo-500 text-slate-700 text-sm transition-all transform hover:scale-110">
                             <i className="fas fa-chevron-right" />
                           </button>
                         </div>
                       </div>
-                      <div className="rounded-lg border border-slate-200 overflow-hidden">
-                        <div className="grid grid-cols-7 text-[10px] font-semibold bg-slate-50 text-slate-600">
+                    <div className="border-4 border-indigo-300 overflow-hidden">
+                      <div className="grid grid-cols-7 text-xs font-bold bg-indigo-100 border-b-2 border-indigo-300 text-indigo-700">
                           {["S", "M", "T", "W", "T", "F", "S"].map((d, i) => (
-                            <div key={i} className="px-1 py-1.5 text-center">{d}</div>
+                          <div key={i} className="px-2 py-3 text-center border-r border-indigo-200 last:border-r-0">{d}</div>
                           ))}
                         </div>
                         <div className="grid grid-cols-7">
-                          {buildMonthCells().map((c, idx) => {
-                            const isSelected = c.date && bkDate && bkDate.getFullYear() === c.date.getFullYear() && bkDate.getMonth() === c.date.getMonth() && bkDate.getDate() === c.date.getDate();
-                            const today = new Date();
-                            today.setHours(0, 0, 0, 0);
-                            const isPast = !!(c.date && c.date.getTime() < today.getTime());
-                            const baseClickable = c.date && !isPast ? "cursor-pointer hover:bg-slate-50" : "bg-slate-50/40 cursor-not-allowed opacity-60";
-                            return (
-                              <div
-                                key={idx}
-                                className={`h-10 border border-slate-100 p-1 text-xs flex items-center justify-center ${baseClickable} ${isSelected ? "bg-pink-50 ring-2 ring-pink-500 font-bold" : ""}`}
-                                onClick={() => c.date && !isPast && (setBkDate(c.date), setBkTime(null))}
-                              >
-                                <span className={`text-slate-700 ${!c.date ? "opacity-0" : ""}`}>{c.label}</span>
-                              </div>
-                            );
-                          })}
-                        </div>
+                        {buildMonthCells().map((c, idx) => {
+                          const isSelected = c.date && bkDate && bkDate.getFullYear() === c.date.getFullYear() && bkDate.getMonth() === c.date.getMonth() && bkDate.getDate() === c.date.getDate();
+                          const today = new Date();
+                          today.setHours(0, 0, 0, 0);
+                          const isPast = !!(c.date && c.date.getTime() < today.getTime());
+                          const isToday = c.date && c.date.getTime() === today.getTime();
+                          const baseClickable = c.date && !isPast ? "cursor-pointer transition-all border-r border-b border-indigo-200" : "bg-slate-50 cursor-not-allowed opacity-60 border-r border-b border-slate-200";
+                          return (
+                            <div
+                              key={idx}
+                              className={`h-14 p-1 text-sm flex items-center justify-center ${baseClickable} ${
+                                isSelected 
+                                  ? "bg-pink-500 text-white font-bold border-4 border-pink-600 hover:bg-pink-600" 
+                                  : isToday 
+                                  ? "bg-indigo-200 font-semibold border-2 border-indigo-400 hover:bg-indigo-300" 
+                                  : !isPast ? "hover:bg-indigo-50" : ""
+                              }`}
+                              onClick={() => c.date && !isPast && (setBkDate(c.date), setBkTime(null))}
+                            >
+                              <span className={!c.date ? "opacity-0" : ""}>{c.label}</span>
+                            </div>
+                          );
+                        })}
                       </div>
                     </div>
+                </div>
 
-                    <div>
-                      <div className="font-bold text-slate-700 mb-2 flex items-center gap-2 text-sm">
-                        <i className="fas fa-clock text-purple-600" />
-                        Select a Time
-                      </div>
-                      <div className="grid grid-cols-4 gap-1.5 max-h-40 overflow-y-auto p-2 bg-gradient-to-br from-purple-50 to-pink-50 rounded-lg border-2 border-purple-200">
+                {/* Time Selection */}
+                <div className="p-6 border-4 border-pink-500 bg-white shadow-lg">
+                  <div className="font-bold text-slate-800 mb-4 flex items-center gap-3 text-lg">
+                    <div className="w-12 h-12 bg-pink-500 flex items-center justify-center text-white border-2 border-pink-600">
+                      <i className="fas fa-clock text-base"></i>
+                    </div>
+                    <span className="uppercase tracking-wide">Select a Time</span>
+                  </div>
+                    <div className="grid grid-cols-4 gap-3 p-3 border-4 border-pink-300">
                         {!bkDate ? (
-                          <div className="col-span-4 text-center text-slate-400 text-xs py-4">
-                            <i className="fas fa-calendar-day text-2xl mb-1 block text-slate-300" />
-                            Select date first
+                        <div className="col-span-4 text-center text-slate-400 py-8 border-4 border-dashed border-pink-300 relative">
+                          <div className="absolute top-2 right-2 w-4 h-4 border-t-2 border-r-2 border-pink-300"></div>
+                          <div className="absolute bottom-2 left-2 w-4 h-4 border-b-2 border-l-2 border-pink-300"></div>
+                          <i className="fas fa-calendar-day text-3xl mb-2 block text-pink-300" />
+                          <p className="text-sm font-semibold">Select date first</p>
                           </div>
                         ) : computeSlots().length === 0 ? (
-                          <div className="col-span-4 text-center text-slate-400 text-xs py-4">
-                            <i className="fas fa-clock text-2xl mb-1 block text-slate-300" />
-                            No slots available
+                        <div className="col-span-4 text-center text-slate-400 py-8 border-4 border-dashed border-pink-300 relative">
+                          <div className="absolute top-2 right-2 w-4 h-4 border-t-2 border-r-2 border-pink-300"></div>
+                          <div className="absolute bottom-2 left-2 w-4 h-4 border-b-2 border-l-2 border-pink-300"></div>
+                          <i className="fas fa-clock text-3xl mb-2 block text-pink-300" />
+                          <p className="text-sm font-semibold">No slots available</p>
                           </div>
                         ) : (
                           computeSlots().map((t) => (
                             <button
                               key={t}
                               onClick={() => setBkTime(t)}
-                              className={`py-2 px-1 rounded-md font-semibold text-xs transition-all ${
+                            className={`py-3 px-2 font-bold text-sm transition-all border-4 transform hover:scale-105 ${
                                 bkTime === t 
-                                  ? "bg-gradient-to-r from-pink-600 to-purple-600 text-white shadow-md" 
-                                  : "bg-white text-slate-700 border border-purple-200 hover:border-pink-400"
+                                ? "bg-pink-500 text-white border-pink-600 shadow-lg scale-105" 
+                                : "bg-white text-slate-700 border-pink-200 hover:border-pink-400 hover:bg-pink-50"
                               }`}
                             >
                               {t}
                             </button>
                           ))
                         )}
-                      </div>
                     </div>
-                  </div>
+                </div>
 
-                  <div>
-                    <div className="font-bold text-slate-700 mb-2 flex items-center gap-2 text-sm">
-                      <i className="fas fa-user-tie text-pink-600" />
-                      Choose Stylist {!bkDate || !bkTime ? "" : "(Optional)"}
+                {/* Staff Selection */}
+                <div className={`p-6 border-4 border-amber-500 bg-white shadow-lg ${!bkDate || !bkTime ? "opacity-50 pointer-events-none" : ""}`}>
+                  <div className="font-bold text-slate-800 mb-4 flex items-center gap-3 text-lg">
+                    <div className="w-12 h-12 bg-amber-500 flex items-center justify-center text-white border-2 border-amber-600">
+                      <i className="fas fa-user-tie text-base"></i>
                     </div>
-                    <div className={`space-y-2 max-h-[400px] overflow-y-auto ${!bkDate || !bkTime ? "opacity-50 pointer-events-none" : ""}`}>
+                    <span className="uppercase tracking-wide">Choose Stylist <span className="text-sm font-normal text-slate-500 normal-case">(Optional)</span></span>
+                  </div>
+                    <div className="space-y-3 max-h-[250px] overflow-y-auto">
                       {!bkDate || !bkTime ? (
-                        <div className="bg-slate-50 border-2 border-dashed border-slate-300 rounded-lg p-6 text-center">
-                          <i className="fas fa-calendar-clock text-4xl text-slate-300 mb-2 block" />
-                          <p className="text-slate-500 font-medium text-sm mb-1">Select Date & Time First</p>
+                        <div className="border-4 border-dashed border-amber-300 p-6 text-center relative">
+                          <div className="absolute top-2 right-2 w-4 h-4 border-t-2 border-r-2 border-amber-300"></div>
+                          <div className="absolute bottom-2 left-2 w-4 h-4 border-b-2 border-l-2 border-amber-300"></div>
+                          <i className="fas fa-calendar-clock text-4xl text-amber-300 mb-2 block" />
+                          <p className="text-slate-500 font-medium text-sm">Select Date & Time First</p>
                         </div>
                       ) : (
                         staffList
@@ -640,115 +749,173 @@ function BookPageContent() {
                               <button
                                 key={st.id}
                                 onClick={() => setBkStaffId(st.id)}
-                                className={`w-full text-left border rounded-lg p-2.5 hover:shadow transition flex items-center gap-2.5 ${selected ? "border-pink-400 bg-pink-50 shadow-md" : "border-slate-200 bg-white"}`}
+                                className={`w-full text-left border-4 p-4 hover:shadow-xl transition-all ${
+                                  selected 
+                                    ? "border-amber-500 bg-amber-50 shadow-lg" 
+                                    : "border-slate-300 bg-white hover:border-amber-400"
+                                }`}
                               >
-                                <img src={`https://api.dicebear.com/7.x/avataaars/svg?seed=${encodeURIComponent(st.avatar || st.name)}`} className="w-9 h-9 rounded-full bg-slate-100 shrink-0" alt="" />
-                                <div className="flex-1 min-w-0">
-                                  <div className="font-semibold text-slate-800 truncate text-sm">{st.name}</div>
-                                  <div className="text-xs text-slate-500 truncate">{st.role}</div>
+                                <div className="flex items-center gap-4">
+                                  <div className={`w-16 h-16 border-2 ${selected ? "border-amber-600" : "border-slate-300"} overflow-hidden`}>
+                                    <img src={`https://api.dicebear.com/7.x/avataaars/svg?seed=${encodeURIComponent(st.avatar || st.name)}`} className="w-full h-full" alt="" />
+                                  </div>
+                                  <div className="flex-1 min-w-0">
+                                    <div className={`font-bold text-slate-800 truncate text-base ${selected ? "text-amber-700" : ""}`}>{st.name}</div>
+                                    <div className="text-xs text-slate-500 truncate mt-1 flex items-center gap-1">
+                                      <i className="fas fa-briefcase text-amber-400"></i>
+                                      {st.role}
+                                    </div>
+                                  </div>
+                                  {selected && (
+                                    <div className="w-10 h-10 bg-amber-500 flex items-center justify-center text-white">
+                                      <i className="fas fa-check"></i>
+                                    </div>
+                                  )}
                                 </div>
-                                {selected && <i className="fas fa-check-circle text-pink-600 text-sm shrink-0" />}
                               </button>
                             );
                           })
                       )}
                     </div>
-                  </div>
-                </div>
-
-                <div className="flex justify-between pt-3 mt-2 border-t border-slate-200">
-                  <button onClick={() => setBkStep(1)} className="px-5 py-2 rounded-lg border border-slate-300 text-slate-700 hover:bg-slate-50 font-medium">
-                    Back
-                  </button>
-                  <button
-                    disabled={!bkDate || !bkTime}
-                    onClick={() => setBkStep(3)}
-                    className={`px-5 py-2 rounded-lg text-white font-semibold ${bkDate && bkTime ? "bg-pink-600 hover:bg-pink-700" : "bg-slate-300 cursor-not-allowed"}`}
-                  >
-                    Continue to Details
-                  </button>
                 </div>
               </div>
-            )}
 
-            {/* Step 3 - Customer Details + Summary */}
-            {bkStep === 3 && (
-              <div className="grid grid-cols-1 lg:grid-cols-2 gap-6">
-                <div className="bg-white rounded-2xl border border-slate-200 shadow-sm p-6">
-                  <div className="font-bold text-slate-700 mb-4">Your Details</div>
+              {/* Right Column: Customer Details & Summary */}
+              <div className="space-y-8">
+                {/* Customer Details */}
+                <div className="p-6 border-4 border-slate-500 bg-white shadow-lg">
+                  <div className="font-bold text-slate-800 mb-5 flex items-center gap-3 text-xl">
+                    <div className="w-12 h-12 bg-slate-500 flex items-center justify-center text-white border-2 border-slate-600">
+                      <i className="fas fa-user text-base"></i>
+                    </div>
+                    <span className="uppercase tracking-wide">Your Details</span>
+                  </div>
                   <div className="space-y-4">
                     <div>
-                      <label className="block text-xs font-medium text-slate-500 mb-1">Full Name *</label>
-                      <input
-                        type="text"
-                        value={bkClientName}
-                        onChange={(e) => setBkClientName(e.target.value)}
-                        className="w-full rounded-lg border border-slate-300 px-3 py-2 text-sm focus:outline-none focus:ring-2 focus:ring-pink-500"
-                        placeholder="John Doe"
-                        required
-                      />
+                        <label className="block text-sm font-semibold text-slate-700 mb-2 flex items-center gap-2">
+                          <i className="fas fa-user text-pink-500"></i>
+                          Full Name <span className="text-pink-600">*</span>
+                        </label>
+                        <input
+                          type="text"
+                          value={bkClientName}
+                          onChange={(e) => setBkClientName(e.target.value)}
+                          className="w-full border-2 border-slate-300 px-4 py-3 text-sm focus:outline-none focus:border-pink-500 focus:ring-2 focus:ring-pink-200 transition-all"
+                          placeholder="Enter your full name"
+                          required
+                        />
+                      </div>
+                      <div>
+                        <label className="block text-sm font-semibold text-slate-700 mb-2 flex items-center gap-2">
+                          <i className="fas fa-envelope text-pink-500"></i>
+                          Email Address
+                        </label>
+                        <input
+                          type="email"
+                          value={bkClientEmail}
+                          onChange={(e) => setBkClientEmail(e.target.value)}
+                          className="w-full border-2 border-slate-300 px-4 py-3 text-sm focus:outline-none focus:border-pink-500 focus:ring-2 focus:ring-pink-200 transition-all"
+                          placeholder="your.email@example.com"
+                        />
+                      </div>
+                      <div>
+                        <label className="block text-sm font-semibold text-slate-700 mb-2 flex items-center gap-2">
+                          <i className="fas fa-phone text-pink-500"></i>
+                          Phone Number
+                        </label>
+                        <input
+                          type="tel"
+                          value={bkClientPhone}
+                          onChange={(e) => setBkClientPhone(e.target.value)}
+                          className="w-full border-2 border-slate-300 px-4 py-3 text-sm focus:outline-none focus:border-pink-500 focus:ring-2 focus:ring-pink-200 transition-all"
+                          placeholder="+1 555 000 1111"
+                        />
+                      </div>
+                      <div>
+                        <label className="block text-sm font-semibold text-slate-700 mb-2 flex items-center gap-2">
+                          <i className="fas fa-sticky-note text-pink-500"></i>
+                          Additional Notes <span className="text-slate-400 font-normal">(Optional)</span>
+                        </label>
+                        <textarea
+                          value={bkNotes}
+                          onChange={(e) => setBkNotes(e.target.value)}
+                          className="w-full border-2 border-slate-300 px-4 py-3 text-sm focus:outline-none focus:border-pink-500 focus:ring-2 focus:ring-pink-200 transition-all resize-none"
+                          placeholder="Any special requests or information..."
+                          rows={4}
+                        />
+                      </div>
                     </div>
-                    <div>
-                      <label className="block text-xs font-medium text-slate-500 mb-1">Email Address</label>
-                      <input
-                        type="email"
-                        value={bkClientEmail}
-                        onChange={(e) => setBkClientEmail(e.target.value)}
-                        className="w-full rounded-lg border border-slate-300 px-3 py-2 text-sm focus:outline-none focus:ring-2 focus:ring-pink-500"
-                        placeholder="john@example.com"
-                      />
-                    </div>
-                    <div>
-                      <label className="block text-xs font-medium text-slate-500 mb-1">Phone Number</label>
-                      <input
-                        type="tel"
-                        value={bkClientPhone}
-                        onChange={(e) => setBkClientPhone(e.target.value)}
-                        className="w-full rounded-lg border border-slate-300 px-3 py-2 text-sm focus:outline-none focus:ring-2 focus:ring-pink-500"
-                        placeholder="+1 555 000 1111"
-                      />
-                    </div>
-                    <div>
-                      <label className="block text-xs font-medium text-slate-500 mb-1">Additional Notes (Optional)</label>
-                      <textarea
-                        value={bkNotes}
-                        onChange={(e) => setBkNotes(e.target.value)}
-                        className="w-full rounded-lg border border-slate-300 px-3 py-2 text-sm focus:outline-none focus:ring-2 focus:ring-pink-500"
-                        placeholder="Any special requests or information…"
-                        rows={4}
-                      />
-                    </div>
-                  </div>
                 </div>
 
-                <div className="bg-white rounded-2xl border border-slate-200 shadow-sm p-6">
-                  <div className="font-bold text-slate-700 mb-4">Booking Summary</div>
-                  <div className="bg-pink-50 rounded-xl border border-pink-100 p-4 space-y-3 text-sm">
-                    <div className="flex justify-between"><span className="text-slate-500">Branch</span><span className="font-semibold text-slate-800">{branches.find((b: any) => b.id === bkBranchId)?.name || "-"}</span></div>
-                    <div className="flex justify-between"><span className="text-slate-500">Service</span><span className="font-semibold text-slate-800">{servicesList.find((s: any) => String(s.id) === String(bkServiceId))?.name || "-"}</span></div>
-                    <div className="flex justify-between"><span className="text-slate-500">Staff</span><span className="font-semibold text-slate-800">{bkStaffId ? staffList.find((s: any) => s.id === bkStaffId)?.name : <span className="text-slate-500 italic">Any Available</span>}</span></div>
-                    <div className="flex justify-between"><span className="text-slate-500">Date</span><span className="font-semibold text-slate-800">{bkDate ? bkDate.toLocaleDateString() : "-"}</span></div>
-                    <div className="flex justify-between"><span className="text-slate-500">Time</span><span className="font-semibold text-slate-800">{bkTime || "-"}</span></div>
-                    <div className="flex justify-between"><span className="text-slate-500">Price</span><span className="font-bold text-pink-600">${servicesList.find((s: any) => String(s.id) === String(bkServiceId))?.price || 0}</span></div>
+                {/* Booking Summary */}
+                <div className="p-6 border-4 border-pink-500 bg-white shadow-lg">
+                  <div className="font-bold text-slate-800 mb-5 flex items-center gap-3 text-xl">
+                    <div className="w-12 h-12 bg-pink-500 flex items-center justify-center text-white border-2 border-pink-600">
+                      <i className="fas fa-receipt text-base"></i>
+                    </div>
+                    <span className="uppercase tracking-wide">Booking Summary</span>
                   </div>
+                  <div className="border-4 border-pink-300 p-5 space-y-3 text-sm bg-pink-50">
+                      <div className="flex justify-between items-center py-2 border-b-2 border-pink-200">
+                        <span className="text-slate-600 font-semibold uppercase text-xs tracking-wide">Branch</span>
+                        <span className="font-bold text-slate-800">{branches.find((b: any) => b.id === bkBranchId)?.name || <span className="text-slate-400">-</span>}</span>
+                      </div>
+                      <div className="flex justify-between items-center py-2 border-b-2 border-pink-200">
+                        <span className="text-slate-600 font-semibold uppercase text-xs tracking-wide">Service</span>
+                        <span className="font-bold text-slate-800">{servicesList.find((s: any) => String(s.id) === String(bkServiceId))?.name || <span className="text-slate-400">-</span>}</span>
+                      </div>
+                      <div className="flex justify-between items-center py-2 border-b-2 border-pink-200">
+                        <span className="text-slate-600 font-semibold uppercase text-xs tracking-wide">Staff</span>
+                        <span className="font-bold text-slate-800">{bkStaffId ? staffList.find((s: any) => s.id === bkStaffId)?.name : <span className="text-slate-400 italic">Any Available</span>}</span>
+                      </div>
+                      <div className="flex justify-between items-center py-2 border-b-2 border-pink-200">
+                        <span className="text-slate-600 font-semibold uppercase text-xs tracking-wide">Date</span>
+                        <span className="font-bold text-slate-800">{bkDate ? bkDate.toLocaleDateString() : <span className="text-slate-400">-</span>}</span>
+                      </div>
+                      <div className="flex justify-between items-center py-2 border-b-2 border-pink-200">
+                        <span className="text-slate-600 font-semibold uppercase text-xs tracking-wide">Time</span>
+                        <span className="font-bold text-slate-800">{bkTime || <span className="text-slate-400">-</span>}</span>
+                      </div>
+                      <div className="flex justify-between items-center pt-3 mt-2 border-t-4 border-pink-500">
+                        <span className="text-slate-800 font-bold text-lg uppercase tracking-wide">Total</span>
+                        <span className="font-black text-3xl text-pink-600">
+                          ${servicesList.find((s: any) => String(s.id) === String(bkServiceId))?.price || 0}
+                        </span>
+                      </div>
+                    </div>
                 </div>
 
-                <div className="lg:col-span-2 mt-1 flex justify-between">
-                  <button disabled={submittingBooking} onClick={() => setBkStep(2)} className={`px-5 py-2 rounded-lg border border-slate-300 ${submittingBooking ? "text-slate-400 cursor-not-allowed" : "text-slate-700 hover:bg-slate-50"} font-medium`}>
-                    Back
-                  </button>
-                  <button
+                {/* Submit Button */}
+                <button
                     disabled={!bkBranchId || !bkServiceId || !bkDate || !bkTime || submittingBooking || !bkClientName.trim()}
                     onClick={handleConfirmBooking}
-                    className={`px-5 py-2 rounded-lg text-white font-semibold ${bkBranchId && bkServiceId && bkDate && bkTime && !submittingBooking && bkClientName.trim() ? "bg-pink-600 hover:bg-pink-700" : "bg-slate-300 cursor-not-allowed"}`}
-                  >
-                    {submittingBooking ? <span className="inline-flex items-center"><i className="fas fa-spinner animate-spin mr-2" /> Confirming…</span> : "Confirm Booking"}
-                  </button>
-                </div>
+                  className={`w-full px-6 py-5 text-white font-bold text-xl transition-all border-4 relative overflow-hidden ${
+                    bkBranchId && bkServiceId && bkDate && bkTime && !submittingBooking && bkClientName.trim() 
+                      ? "bg-indigo-900 border-indigo-700 hover:bg-indigo-800 hover:border-indigo-600 active:scale-[0.98]" 
+                      : "bg-slate-300 border-slate-400 cursor-not-allowed"
+                  }`}
+                >
+                  {/* Diagonal stripe pattern */}
+                  <div className={`absolute inset-0 opacity-10 ${bkBranchId && bkServiceId && bkDate && bkTime && !submittingBooking && bkClientName.trim() ? "" : "hidden"}`} style={{
+                    backgroundImage: `repeating-linear-gradient(45deg, transparent, transparent 10px, currentColor 10px, currentColor 11px)`,
+                  }}></div>
+                  
+                  <span className="relative z-10 inline-flex items-center justify-center gap-2 uppercase tracking-wider">
+                    {submittingBooking ? (
+                      <>
+                        <i className="fas fa-spinner animate-spin text-2xl"></i>
+                        <span>Confirming Your Booking...</span>
+                      </>
+                    ) : (
+                      <>
+                        <i className="fas fa-check-circle text-2xl"></i>
+                        <span>Confirm Booking</span>
+                      </>
+                    )}
+                  </span>
+                </button>
               </div>
-            )}
-          </div>
-        </div>
+            </div>
       </div>
 
       {/* Font Awesome for icons */}
