@@ -37,11 +37,24 @@ export async function GET(req: NextRequest) {
     });
   } catch (e: any) {
     console.error("Error fetching owner:", e);
-    const errorMessage = process.env.NODE_ENV === "production" 
-      ? "Internal error" 
-      : (e?.message || "Internal error");
+    
+    // Provide helpful error messages even in production
+    let errorMessage = "Internal error";
+    if (e?.message) {
+      if (e.message.includes("credentials") || e.message.includes("Firebase Admin")) {
+        errorMessage = "Server configuration error. Please contact support.";
+      } else if (e.message.includes("permission") || e.message.includes("PERMISSION_DENIED")) {
+        errorMessage = "Database permission error. Please contact support.";
+      } else if (process.env.NODE_ENV !== "production") {
+        errorMessage = e.message;
+      }
+    }
+    
     return NextResponse.json(
-      { error: errorMessage },
+      { 
+        error: errorMessage,
+        helpText: "If this error persists, please ensure Firebase Admin credentials are configured on the server."
+      },
       { status: 500 }
     );
   }

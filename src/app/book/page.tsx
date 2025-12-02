@@ -89,8 +89,10 @@ function BookPageContent() {
         if (!branchesRes.ok) {
           const errorData = await branchesRes.json().catch(() => ({}));
           const errorMsg = errorData.error || errorData.details || `Failed to fetch branches: ${branchesRes.status}`;
+          const helpText = errorData.helpText || "";
           console.error("Branches API error:", errorMsg);
-          throw new Error(errorMsg);
+          console.error("Help text:", helpText);
+          throw new Error(errorMsg + (helpText ? ` ${helpText}` : ""));
         }
         const branchesData = await branchesRes.json();
         const mappedBranches = (branchesData.branches || []).map((r: any) => ({ 
@@ -109,7 +111,11 @@ function BookPageContent() {
         const servicesRes = await fetch(`/api/services?ownerUid=${encodeURIComponent(ownerUid)}`);
         if (!servicesRes.ok) {
           const errorData = await servicesRes.json().catch(() => ({}));
-          throw new Error(errorData.error || `Failed to fetch services: ${servicesRes.status}`);
+          const errorMsg = errorData.error || `Failed to fetch services: ${servicesRes.status}`;
+          const helpText = errorData.helpText || "";
+          console.error("Services API error:", errorMsg);
+          console.error("Help text:", helpText);
+          throw new Error(errorMsg + (helpText ? ` ${helpText}` : ""));
         }
         const servicesData = await servicesRes.json();
         const mappedServices = (servicesData.services || [])
@@ -135,7 +141,11 @@ function BookPageContent() {
         const staffRes = await fetch(`/api/staff?ownerUid=${encodeURIComponent(ownerUid)}`);
         if (!staffRes.ok) {
           const errorData = await staffRes.json().catch(() => ({}));
-          throw new Error(errorData.error || `Failed to fetch staff: ${staffRes.status}`);
+          const errorMsg = errorData.error || `Failed to fetch staff: ${staffRes.status}`;
+          const helpText = errorData.helpText || "";
+          console.error("Staff API error:", errorMsg);
+          console.error("Help text:", helpText);
+          throw new Error(errorMsg + (helpText ? ` ${helpText}` : ""));
         }
         const staffData = await staffRes.json();
         const mappedStaff = (staffData.staff || []).map((r: any) => ({
@@ -429,6 +439,7 @@ function BookPageContent() {
 
   if (error && branches.length === 0 && servicesList.length === 0) {
     const isFirebaseError = error.includes("Firebase") || error.includes("credentials") || error.includes("Missing");
+    const isServerConfigError = error.includes("Server configuration") || error.includes("Internal error");
     return (
       <div className="min-h-screen flex items-center justify-center bg-gradient-to-br from-pink-50 to-purple-50 p-4">
         <div className="bg-white rounded-2xl shadow-xl p-8 max-w-2xl w-full">
@@ -436,19 +447,28 @@ function BookPageContent() {
             <i className="fas fa-exclamation-triangle text-4xl text-yellow-500 mb-4" />
             <h2 className="text-2xl font-bold text-slate-800 mb-2">Unable to Load Data</h2>
             <p className="text-slate-600 mb-4 font-mono text-sm break-words">{error}</p>
-            {isFirebaseError && (
-            <div className="bg-slate-50 rounded-lg p-4 text-left text-sm">
-                <p className="font-semibold mb-2">To fix this issue, check your <code className="bg-slate-200 px-1 rounded">.env</code> file has:</p>
-              <div className="bg-slate-800 text-green-400 p-3 rounded text-xs overflow-x-auto mb-3">
-                <div className="mb-1">FIREBASE_PROJECT_ID=bmspro-pink</div>
-                <div className="mb-1">FIREBASE_CLIENT_EMAIL=firebase-adminsdk-xxxxx@bmspro-pink.iam.gserviceaccount.com</div>
-                <div>FIREBASE_PRIVATE_KEY="-----BEGIN PRIVATE KEY-----\\n..."</div>
-              </div>
-                <p className="mt-2 text-xs text-slate-500">Owner UID: <code className="bg-slate-200 px-1 rounded">{ownerUid}</code></p>
-                <p className="mt-2 text-xs text-slate-500 font-semibold">⚠️ Make sure to restart your dev server after updating .env file!</p>
+            {(isFirebaseError || isServerConfigError) && (
+            <div className="bg-red-50 rounded-lg p-4 text-left text-sm border-2 border-red-200">
+                <p className="font-semibold mb-2 text-red-800">⚠️ Server Configuration Issue</p>
+                <p className="text-slate-700 mb-3">The booking engine requires Firebase Admin credentials to be configured on the server.</p>
+                <p className="font-semibold mb-2">For Server Deployment (Vercel, etc.):</p>
+                <div className="bg-slate-800 text-green-400 p-3 rounded text-xs overflow-x-auto mb-3">
+                  <div className="mb-1">Add these environment variables:</div>
+                  <div className="mb-1">FIREBASE_PROJECT_ID=bmspro-pink</div>
+                  <div className="mb-1">FIREBASE_CLIENT_EMAIL=firebase-adminsdk-xxxxx@bmspro-pink.iam.gserviceaccount.com</div>
+                  <div>FIREBASE_PRIVATE_KEY="-----BEGIN PRIVATE KEY-----\\n..."</div>
+                </div>
+                <p className="text-xs text-slate-600 mb-2">How to get credentials:</p>
+                <ol className="text-xs text-slate-600 list-decimal ml-4 space-y-1">
+                  <li>Go to Firebase Console → Project Settings → Service Accounts</li>
+                  <li>Click "Generate New Private Key"</li>
+                  <li>Copy the values from the downloaded JSON file</li>
+                  <li>Add them as environment variables in your deployment platform</li>
+                </ol>
+                <p className="mt-3 text-xs text-slate-500">Owner UID: <code className="bg-slate-200 px-1 rounded">{ownerUid}</code></p>
             </div>
             )}
-            {!isFirebaseError && (
+            {!isFirebaseError && !isServerConfigError && (
               <div className="bg-blue-50 rounded-lg p-4 text-left text-sm">
                 <p className="text-slate-600">This might mean there are no branches/services set up for this salon owner yet.</p>
                 <p className="mt-2 text-xs text-slate-500">Owner UID: <code className="bg-slate-200 px-1 rounded">{ownerUid}</code></p>
