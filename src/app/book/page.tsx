@@ -1,13 +1,15 @@
 "use client";
 import React, { useEffect, useState, Suspense } from "react";
-import { useSearchParams } from "next/navigation";
+import { useSearchParams, useRouter } from "next/navigation";
 import { createBooking, subscribeBookingsForOwnerAndDate } from "@/lib/bookings";
 import { auth, db } from "@/lib/firebase";
 import { signInWithCustomToken, onAuthStateChanged, signOut } from "firebase/auth";
 import { createCustomerDocument, incrementCustomerBookings } from "@/lib/customers";
+import NotificationPanel from "@/components/NotificationPanel";
 
 function BookPageContent() {
   const searchParams = useSearchParams();
+  const router = useRouter();
   // Default ownerUid for this salon, can be overridden via URL params
   const DEFAULT_OWNER_UID = "0Z0k6PleLzLHXrYG8UdUKvp7DUt2";
   const ownerUid = searchParams.get("ownerUid") || DEFAULT_OWNER_UID;
@@ -34,6 +36,9 @@ function BookPageContent() {
   const [editPhone, setEditPhone] = useState<string>("");
   const [editLoading, setEditLoading] = useState<boolean>(false);
   const [editError, setEditError] = useState<string>("");
+  
+  // Notification panel
+  const [showNotificationPanel, setShowNotificationPanel] = useState<boolean>(false);
 
   // Booking state
   const [bkBranchId, setBkBranchId] = useState<string | null>(null);
@@ -1042,14 +1047,21 @@ function BookPageContent() {
     <div className="min-h-screen bg-gradient-to-br from-pink-50 via-purple-50 to-indigo-50">
       {/* Creative Header with Salon Name */}
       <div className="relative overflow-hidden bg-indigo-900">
-        {/* Logout Button - Top Right */}
-        <div className="absolute top-8 right-6 z-50">
+        {/* Notification and Logout Buttons - Top Right */}
+        <div className="absolute top-8 right-6 z-50 flex items-center gap-3">
+          <button
+            onClick={() => setShowNotificationPanel(true)}
+            className="w-10 h-10 bg-white/10 backdrop-blur-sm border border-white/20 hover:bg-white/20 text-white font-semibold rounded-lg transition-all hover:scale-105 active:scale-95 flex items-center justify-center"
+            title="Notifications"
+          >
+            <i className="fas fa-bell"></i>
+          </button>
           <button
             onClick={handleLogoutClick}
-            className="px-4 py-2 bg-white/10 backdrop-blur-sm border border-white/20 hover:bg-white/20 text-white font-semibold rounded-lg transition-all hover:scale-105 active:scale-95 flex items-center gap-2"
+            className="w-10 h-10 bg-white/10 backdrop-blur-sm border border-white/20 hover:bg-white/20 text-white font-semibold rounded-lg transition-all hover:scale-105 active:scale-95 flex items-center justify-center"
+            title="Logout"
           >
             <i className="fas fa-sign-out-alt"></i>
-            <span className="hidden sm:inline">Logout</span>
           </button>
         </div>
 
@@ -1783,6 +1795,15 @@ function BookPageContent() {
               </div>
             </div>
       </div>
+
+      {/* Notification Panel */}
+      <NotificationPanel
+        isOpen={showNotificationPanel}
+        onClose={() => setShowNotificationPanel(false)}
+        customerEmail={currentCustomer?.email || bkClientEmail}
+        customerPhone={currentCustomer?.phone || bkClientPhone}
+        customerUid={currentCustomer?.uid}
+      />
 
       {/* Font Awesome for icons */}
       <link rel="stylesheet" href="https://cdnjs.cloudflare.com/ajax/libs/font-awesome/6.4.0/css/all.min.css" />

@@ -116,3 +116,13 @@ export const adminDb = () => {
   }
 };
 
+export const adminAuth = () => {
+  try {
+    const { getAuth } = require("firebase-admin/auth");
+    return getAuth(getAdminApp());
+  } catch (error) {
+    console.error("Error getting Auth:", error);
+    throw error;
+  }
+};
+

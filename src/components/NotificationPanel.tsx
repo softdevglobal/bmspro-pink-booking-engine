@@ -1,0 +1,350 @@
+"use client";
+
+import { useState, useEffect } from "react";
+import { Notification } from "@/lib/notifications";
+
+interface NotificationPanelProps {
+  isOpen: boolean;
+  onClose: () => void;
+  customerEmail?: string;
+  customerPhone?: string;
+  customerUid?: string;
+}
+
+export default function NotificationPanel({
+  isOpen,
+  onClose,
+  customerEmail,
+  customerPhone,
+  customerUid,
+}: NotificationPanelProps) {
+  const [notifications, setNotifications] = useState<Notification[]>([]);
+  const [loading, setLoading] = useState(false);
+  const [error, setError] = useState("");
+  const [filter, setFilter] = useState<"all" | "unread">("all");
+
+  useEffect(() => {
+    if (isOpen && (customerEmail || customerPhone || customerUid)) {
+      fetchNotifications();
+    }
+  }, [isOpen, customerEmail, customerPhone, customerUid]);
+
+  const fetchNotifications = async () => {
+    setLoading(true);
+    setError("");
+
+    try {
+      const params = new URLSearchParams();
+      if (customerUid) {
+        params.set("uid", customerUid);
+      } else if (customerEmail) {
+        params.set("email", customerEmail);
+      } else if (customerPhone) {
+        params.set("phone", customerPhone);
+      }
+
+      const response = await fetch(`/api/notifications?${params.toString()}`);
+      const data = await response.json();
+
+      if (!response.ok) {
+        throw new Error(data.error || "Failed to fetch notifications");
+      }
+
+      setNotifications(data.notifications || []);
+    } catch (err: any) {
+      setError(err.message || "Failed to load notifications");
+      setNotifications([]);
+    } finally {
+      setLoading(false);
+    }
+  };
+
+  const markAsRead = async (notificationId: string) => {
+    try {
+      const response = await fetch(`/api/notifications/${notificationId}/read`, {
+        method: "PATCH",
+      });
+
+      if (response.ok) {
+        setNotifications((prev) =>
+          prev.map((notif) =>
+            notif.id === notificationId ? { ...notif, read: true } : notif
+          )
+        );
+      }
+    } catch (err) {
+      console.error("Error marking notification as read:", err);
+    }
+  };
+
+  const getStatusStyle = (status: string) => {
+    switch (status) {
+      case "Confirmed":
+        return {
+          bg: "bg-emerald-50",
+          text: "text-emerald-700",
+          badge: "bg-emerald-500",
+          icon: "fa-check-circle",
+          iconColor: "text-emerald-500"
+        };
+      case "Completed":
+        return {
+          bg: "bg-blue-50",
+          text: "text-blue-700",
+          badge: "bg-blue-500",
+          icon: "fa-circle-check",
+          iconColor: "text-blue-500"
+        };
+      case "Canceled":
+        return {
+          bg: "bg-red-50",
+          text: "text-red-700",
+          badge: "bg-red-500",
+          icon: "fa-circle-xmark",
+          iconColor: "text-red-500"
+        };
+      default:
+        return {
+          bg: "bg-gray-50",
+          text: "text-gray-700",
+          badge: "bg-gray-500",
+          icon: "fa-circle-info",
+          iconColor: "text-gray-500"
+        };
+    }
+  };
+
+  const formatDate = (timestamp: any) => {
+    if (!timestamp) return "";
+
+    let date: Date;
+    if (timestamp.seconds) {
+      date = new Date(timestamp.seconds * 1000);
+    } else if (timestamp.toDate) {
+      date = timestamp.toDate();
+    } else {
+      date = new Date(timestamp);
+    }
+
+    const now = new Date();
+    const diffMs = now.getTime() - date.getTime();
+    const diffMins = Math.floor(diffMs / 60000);
+    const diffHours = Math.floor(diffMs / 3600000);
+    const diffDays = Math.floor(diffMs / 86400000);
+
+    if (diffMins < 1) return "Just now";
+    if (diffMins < 60) return `${diffMins}m ago`;
+    if (diffHours < 24) return `${diffHours}h ago`;
+    if (diffDays < 7) return `${diffDays}d ago`;
+
+    return date.toLocaleDateString();
+  };
+
+  const unreadCount = notifications.filter((n) => !n.read).length;
+  const filteredNotifications = filter === "unread" 
+    ? notifications.filter((n) => !n.read)
+    : notifications;
+
+  if (!isOpen) return null;
+
+  return (
+    <>
+      {/* Backdrop - transparent click area */}
+      <div
+        className="fixed inset-0 z-[60]"
+        onClick={onClose}
+      />
+
+      {/* Panel */}
+      <div className="fixed top-20 right-6 w-full max-w-md bg-white rounded-2xl shadow-2xl border border-gray-200 z-[70] max-h-[80vh] flex flex-col animate-slide-in overflow-hidden">
+        {/* Header */}
+        <div className="bg-gradient-to-r from-indigo-600 to-purple-600 p-5">
+          <div className="flex items-center justify-between">
+            <div className="flex items-center gap-3">
+              <div className="w-10 h-10 bg-white/20 backdrop-blur-sm rounded-full flex items-center justify-center">
+                <i className="fas fa-bell text-white text-lg"></i>
+              </div>
+              <div>
+                <h3 className="text-xl font-bold text-white">Notifications</h3>
+                {unreadCount > 0 && (
+                  <p className="text-white/80 text-xs">{unreadCount} unread</p>
+                )}
+              </div>
+            </div>
+            <button
+              onClick={onClose}
+              className="w-8 h-8 flex items-center justify-center rounded-full hover:bg-white/20 transition-colors text-white"
+              aria-label="Close"
+            >
+              <i className="fas fa-times text-lg"></i>
+            </button>
+          </div>
+          
+          {/* Filter Tabs */}
+          {notifications.length > 0 && (
+            <div className="flex gap-2 mt-4">
+              <button
+                onClick={() => setFilter("all")}
+                className={`px-4 py-1.5 rounded-full text-sm font-medium transition-all ${
+                  filter === "all"
+                    ? "bg-white text-indigo-600 shadow-sm"
+                    : "bg-white/20 text-white hover:bg-white/30"
+                }`}
+              >
+                All ({notifications.length})
+              </button>
+              <button
+                onClick={() => setFilter("unread")}
+                className={`px-4 py-1.5 rounded-full text-sm font-medium transition-all ${
+                  filter === "unread"
+                    ? "bg-white text-indigo-600 shadow-sm"
+                    : "bg-white/20 text-white hover:bg-white/30"
+                }`}
+              >
+                Unread ({unreadCount})
+              </button>
+            </div>
+          )}
+        </div>
+
+        {/* Content */}
+        <div className="flex-1 overflow-y-auto bg-gray-50">
+          {loading && (
+            <div className="flex flex-col items-center justify-center py-12 px-4">
+              <div className="relative">
+                <div className="w-12 h-12 border-4 border-indigo-200 border-t-indigo-600 rounded-full animate-spin"></div>
+              </div>
+              <p className="text-gray-500 mt-4 font-medium">Loading notifications...</p>
+            </div>
+          )}
+
+          {error && (
+            <div className="m-4">
+              <div className="p-4 bg-red-50 border-l-4 border-red-500 rounded-lg">
+                <div className="flex items-center gap-3">
+                  <i className="fas fa-exclamation-circle text-red-500 text-xl"></i>
+                  <p className="text-red-700 text-sm font-medium">{error}</p>
+                </div>
+              </div>
+            </div>
+          )}
+
+          {!loading && !error && filteredNotifications.length === 0 && notifications.length === 0 && (
+            <div className="flex flex-col items-center justify-center py-12 px-4">
+              <div className="w-20 h-20 bg-gradient-to-br from-indigo-100 to-purple-100 rounded-full flex items-center justify-center mb-4">
+                <i className="fas fa-bell-slash text-3xl text-indigo-400"></i>
+              </div>
+              <h4 className="text-lg font-semibold text-gray-800 mb-1">No notifications yet</h4>
+              <p className="text-sm text-gray-500 text-center">You&apos;ll see booking updates here</p>
+            </div>
+          )}
+
+          {!loading && !error && filteredNotifications.length === 0 && notifications.length > 0 && (
+            <div className="flex flex-col items-center justify-center py-12 px-4">
+              <div className="w-20 h-20 bg-gradient-to-br from-green-100 to-emerald-100 rounded-full flex items-center justify-center mb-4">
+                <i className="fas fa-check-double text-3xl text-green-500"></i>
+              </div>
+              <h4 className="text-lg font-semibold text-gray-800 mb-1">All caught up!</h4>
+              <p className="text-sm text-gray-500 text-center">No unread notifications</p>
+            </div>
+          )}
+
+          {!loading && !error && filteredNotifications.length > 0 && (
+            <div className="divide-y divide-gray-200">
+              {filteredNotifications.map((notification) => {
+                const statusStyle = getStatusStyle(notification.status);
+                return (
+                  <div
+                    key={notification.id}
+                    onClick={() => !notification.read && markAsRead(notification.id!)}
+                    className={`p-4 transition-all cursor-pointer hover:bg-white relative ${
+                      notification.read ? "bg-gray-50/50" : "bg-white"
+                    }`}
+                  >
+                    {/* Unread indicator */}
+                    {!notification.read && (
+                      <div className="absolute left-0 top-0 bottom-0 w-1 bg-gradient-to-b from-indigo-500 to-purple-500"></div>
+                    )}
+
+                    <div className="flex items-start gap-3 pl-2">
+                      {/* Icon */}
+                      <div className={`flex-shrink-0 w-11 h-11 ${statusStyle.bg} rounded-xl flex items-center justify-center shadow-sm`}>
+                        <i className={`fas ${statusStyle.icon} ${statusStyle.iconColor} text-lg`}></i>
+                      </div>
+
+                      {/* Content */}
+                      <div className="flex-1 min-w-0">
+                        <div className="flex items-start justify-between gap-2 mb-1">
+                          <h4 className={`font-semibold text-sm ${notification.read ? "text-gray-600" : "text-gray-900"}`}>
+                            {notification.title}
+                          </h4>
+                          {!notification.read && (
+                            <span className="flex-shrink-0 w-2 h-2 bg-indigo-500 rounded-full mt-1.5 animate-pulse"></span>
+                          )}
+                        </div>
+
+                        <p className={`text-sm mb-2.5 ${notification.read ? "text-gray-500" : "text-gray-700"}`}>
+                          {notification.message}
+                        </p>
+
+                        <div className="flex items-center gap-2 flex-wrap">
+                          <span className={`inline-flex items-center gap-1.5 px-2.5 py-1 ${statusStyle.bg} ${statusStyle.text} rounded-full text-xs font-semibold`}>
+                            <span className={`w-1.5 h-1.5 ${statusStyle.badge} rounded-full`}></span>
+                            {notification.status}
+                          </span>
+
+                          {notification.bookingCode && (
+                            <span className="inline-flex items-center gap-1 text-xs text-gray-500 font-medium">
+                              <i className="fas fa-ticket text-[10px]"></i>
+                              {notification.bookingCode}
+                            </span>
+                          )}
+
+                          <span className="inline-flex items-center gap-1 text-xs text-gray-400 ml-auto">
+                            <i className="far fa-clock text-[10px]"></i>
+                            {formatDate(notification.createdAt)}
+                          </span>
+                        </div>
+                      </div>
+                    </div>
+                  </div>
+                );
+              })}
+            </div>
+          )}
+        </div>
+
+        {/* Footer */}
+        {notifications.length > 0 && (
+          <div className="border-t border-gray-200 bg-white p-3">
+            <button
+              onClick={fetchNotifications}
+              disabled={loading}
+              className="w-full py-2.5 px-4 bg-gradient-to-r from-indigo-600 to-purple-600 hover:from-indigo-700 hover:to-purple-700 text-white font-medium rounded-lg transition-all disabled:opacity-50 disabled:cursor-not-allowed flex items-center justify-center gap-2"
+            >
+              <i className="fas fa-sync-alt"></i>
+              <span>Refresh</span>
+            </button>
+          </div>
+        )}
+      </div>
+
+      <style jsx>{`
+        @keyframes slide-in {
+          from {
+            opacity: 0;
+            transform: translateY(-10px);
+          }
+          to {
+            opacity: 1;
+            transform: translateY(0);
+          }
+        }
+        .animate-slide-in {
+          animation: slide-in 0.2s ease-out;
+        }
+      `}</style>
+    </>
+  );
+}
+
