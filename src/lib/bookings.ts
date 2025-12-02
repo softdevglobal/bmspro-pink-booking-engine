@@ -37,6 +37,7 @@ export type BookingInput = {
   price: number;
   ownerUid: string; // Required for booking engine
   customerUid?: string; // Customer account UID (for authenticated bookings)
+  services?: Array<{ id: string | number; name?: string; price?: number; duration?: number }>; // Multiple services details
 };
 
 export async function createBooking(input: BookingInput): Promise<{ id: string; bookingCode?: string }> {
@@ -65,6 +66,7 @@ export async function createBooking(input: BookingInput): Promise<{ id: string; 
         status: input.status || "Pending",
         price: input.price,
         customerUid: input.customerUid || undefined,
+        services: input.services || undefined,
       }),
     });
 
@@ -94,6 +96,7 @@ export async function createBooking(input: BookingInput): Promise<{ id: string; 
       status: input.status || "Pending",
       price: Number(input.price) || 0,
       customerUid: input.customerUid || null,
+      services: input.services || null,
       createdAt: serverTimestamp(),
       updatedAt: serverTimestamp(),
     };

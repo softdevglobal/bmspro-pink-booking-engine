@@ -38,6 +38,8 @@ function BookPageContent() {
   // Booking state
   const [bkBranchId, setBkBranchId] = useState<string | null>(null);
   const [bkServiceId, setBkServiceId] = useState<number | null>(null);
+  const [bkSelectedServices, setBkSelectedServices] = useState<Array<number | string>>([]); // Multiple services
+  const [bkServiceTimes, setBkServiceTimes] = useState<Record<string, string>>({}); // Time for each service
   const [bkStaffId, setBkStaffId] = useState<string | null>(null);
   const [bkMonthYear, setBkMonthYear] = useState<{ month: number; year: number }>(() => {
     const t = new Date();
@@ -61,6 +63,7 @@ function BookPageContent() {
     time: string;
     price: number;
     duration: number;
+    services?: Array<{ name: string; price: number; duration: number; time?: string }>;
   } | null>(null);
 
   // Real data from Firestore
@@ -442,6 +445,8 @@ function BookPageContent() {
   const resetBooking = () => {
     setBkBranchId(null);
     setBkServiceId(null);
+    setBkSelectedServices([]);
+    setBkServiceTimes({});
     setBkStaffId(null);
     const t = new Date();
     setBkMonthYear({ month: t.getMonth(), year: t.getFullYear() });
@@ -501,11 +506,23 @@ function BookPageContent() {
     return h * 60 + m;
   };
   
-  const computeSlots = () => {
-    if (!bkServiceId || !bkDate) return [];
-    const service = servicesList.find((s) => String(s.id) === String(bkServiceId));
-    if (!service) return [];
-    const duration = Number(service?.duration) || 60;
+  const computeSlots = (forServiceId?: number | string) => {
+    if (!bkDate) return [];
+    
+    // If computing for a specific service, use its duration
+    let duration = 60;
+    if (forServiceId) {
+      const service = servicesList.find((s) => String(s.id) === String(forServiceId));
+      duration = Number(service?.duration) || 60;
+    } else if (bkSelectedServices.length > 0) {
+      // Calculate total duration for all selected services
+      duration = bkSelectedServices.reduce((sum: number, serviceId: number | string) => {
+        const service = servicesList.find((s) => String(s.id) === String(serviceId));
+        return sum + (Number(service?.duration) || 0);
+      }, 0);
+    }
+    
+    if (duration === 0) return [];
     
     // Filter out occupied slots
     const dateStr = formatLocalYmd(bkDate);
@@ -540,22 +557,32 @@ function BookPageContent() {
   };
   
   const handleConfirmBooking = async () => {
-    if (!bkServiceId || !bkBranchId || !bkDate || !bkTime || !ownerUid || !currentCustomer) return;
+    if (bkSelectedServices.length === 0 || !bkBranchId || !bkDate || !bkTime || !ownerUid || !currentCustomer) return;
     setSubmittingBooking(true);
     
-    const service = servicesList.find((s) => String(s.id) === String(bkServiceId));
-    if (!service) {
-      alert("Service not found. Please try again.");
+    // Get all selected services
+    const selectedServiceObjects = bkSelectedServices.map((serviceId: number | string) => 
+      servicesList.find((s) => String(s.id) === String(serviceId))
+    ).filter(Boolean);
+    
+    if (selectedServiceObjects.length === 0) {
+      alert("Please select at least one service.");
       setSubmittingBooking(false);
       return;
     }
-    const serviceName = service?.name || "";
+    
+    // Calculate totals
+    const totalPrice = selectedServiceObjects.reduce((sum: number, s: any) => sum + (Number(s?.price) || 0), 0);
+    const totalDuration = selectedServiceObjects.reduce((sum: number, s: any) => sum + (Number(s?.duration) || 0), 0);
+    const serviceNames = selectedServiceObjects.map((s: any) => s?.name || "").join(", ");
+    const serviceIds = selectedServiceObjects.map((s: any) => s?.id).join(",");
+    
     const branchName = branches.find((b: any) => String(b.id) === String(bkBranchId))?.name || "";
     const staffName = bkStaffId ? staffList.find((s: any) => String(s.id) === String(bkStaffId))?.name || "" : "Any Available";
     const client = currentCustomer.fullName || bkClientName?.trim() || "Customer";
     const bookingDate = formatLocalYmd(bkDate);
-    const bookingPrice = service?.price || 0;
-    const bookingDuration = service?.duration || 60;
+    const bookingPrice = totalPrice;
+    const bookingDuration = totalDuration;
     
     try {
       const result = await createBooking({
@@ -564,8 +591,8 @@ function BookPageContent() {
         clientEmail: currentCustomer.email || bkClientEmail?.trim() || undefined,
         clientPhone: bkClientPhone?.trim() || undefined,
         notes: bkNotes?.trim() || undefined,
-        serviceId: bkServiceId,
-        serviceName,
+        serviceId: serviceIds, // Multiple service IDs as comma-separated string
+        serviceName: serviceNames, // Multiple service names
         staffId: bkStaffId,
         staffName: staffName || "Any Available",
         branchId: bkBranchId,
@@ -575,7 +602,13 @@ function BookPageContent() {
         duration: bookingDuration,
         status: "Pending",
         price: bookingPrice,
-        customerUid: currentCustomer.uid, // Link booking to customer
+        customerUid: currentCustomer.uid,
+        services: selectedServiceObjects.map((s: any) => ({ // Store detailed service info
+          id: s?.id || "",
+          name: s?.name || "",
+          price: Number(s?.price) || 0,
+          duration: Number(s?.duration) || 0
+        })),
       });
       
       // Increment customer's booking count
@@ -585,13 +618,18 @@ function BookPageContent() {
       setBookingSummary({
         bookingCode: result.bookingCode,
         client,
-        serviceName,
+        serviceName: serviceNames,
         branchName,
         staffName: staffName || "Any Available",
         date: bookingDate,
         time: bkTime || "",
         price: bookingPrice,
         duration: bookingDuration,
+        services: selectedServiceObjects.map((s: any) => ({ 
+          name: s?.name || "",
+          price: Number(s?.price) || 0,
+          duration: Number(s?.duration) || 0
+        })),
       });
       
       setShowSuccess(true);
@@ -880,9 +918,31 @@ function BookPageContent() {
                   <span className="font-mono font-bold text-slate-800">{bookingSummary.bookingCode}</span>
                 </div>
               )}
-              <div className="flex items-center justify-between py-2 border-b-2 border-pink-200">
-                <span className="text-slate-600 font-semibold uppercase text-xs tracking-wide">Service</span>
-                <span className="font-bold text-slate-800 text-right">{bookingSummary.serviceName}</span>
+              <div className="py-2 border-b-2 border-pink-200">
+                <span className="text-slate-600 font-semibold uppercase text-xs tracking-wide block mb-2">Services</span>
+                {bookingSummary.services && bookingSummary.services.length > 0 ? (
+                  <div className="space-y-1">
+                    {bookingSummary.services.map((service, idx) => (
+                      <div key={idx} className="bg-purple-50 px-3 py-2 rounded">
+                        <div className="flex justify-between items-center text-xs mb-1">
+                          <span className="font-bold text-slate-800">{service.name}</span>
+                          <div className="flex items-center gap-2">
+                            <span className="text-purple-600">{service.duration}min</span>
+                            <span className="font-bold text-pink-600">${service.price}</span>
+                          </div>
+                        </div>
+                        {service.time && (
+                          <div className="text-[10px] text-purple-700 font-semibold">
+                            <i className="fas fa-clock mr-1"></i>
+                            Scheduled at: {service.time}
+                          </div>
+                        )}
+                      </div>
+                    ))}
+                  </div>
+                ) : (
+                  <span className="font-bold text-slate-800 text-right">{bookingSummary.serviceName}</span>
+                )}
               </div>
               <div className="flex items-center justify-between py-2 border-b-2 border-pink-200">
                 <span className="text-slate-600 font-semibold uppercase text-xs tracking-wide">Branch</span>
@@ -897,11 +957,11 @@ function BookPageContent() {
                 <span className="font-bold text-slate-800 text-right">{new Date(bookingSummary.date).toLocaleDateString()} {bookingSummary.time}</span>
               </div>
               <div className="flex items-center justify-between py-2 border-b-2 border-pink-200">
-                <span className="text-slate-600 font-semibold uppercase text-xs tracking-wide">Duration</span>
+                <span className="text-slate-600 font-semibold uppercase text-xs tracking-wide">Total Duration</span>
                 <span className="font-bold text-slate-800">{bookingSummary.duration} mins</span>
               </div>
               <div className="flex items-center justify-between pt-3 mt-2 border-t-4 border-pink-500">
-                <span className="text-slate-800 font-bold text-base sm:text-lg uppercase tracking-wide">Total</span>
+                <span className="text-slate-800 font-bold text-base sm:text-lg uppercase tracking-wide">Total Price</span>
                 <span className="font-black text-2xl sm:text-3xl text-pink-600">${bookingSummary.price}</span>
               </div>
             </div>
@@ -1054,57 +1114,50 @@ function BookPageContent() {
         <div className="absolute bottom-0 left-0 w-96 h-96 bg-purple-500 opacity-15 rounded-full -ml-48 -mb-48"></div>
         <div className="absolute top-1/2 right-1/4 w-32 h-32 bg-rose-400 opacity-25 rotate-45"></div>
         
-        {/* Decorative corner elements */}
-        <div className="absolute top-0 left-0 w-24 h-24 border-t-4 border-l-4 border-white/20"></div>
-        <div className="absolute top-0 right-0 w-24 h-24 border-t-4 border-r-4 border-white/20"></div>
-        <div className="absolute bottom-0 left-0 w-24 h-24 border-b-4 border-l-4 border-white/20"></div>
-        <div className="absolute bottom-0 right-0 w-24 h-24 border-b-4 border-r-4 border-white/20"></div>
-        
-        <div className="relative max-w-7xl mx-auto px-3 sm:px-4 py-12 sm:py-16 md:py-20 lg:py-24">
-          <div className="text-center relative z-10">
-            {/* Top decorative line */}
-            <div className="flex items-center justify-center mb-4 sm:mb-6 md:mb-8">
-              <div className="h-0.5 w-12 sm:w-16 md:w-20 bg-white/40"></div>
-              <div className="mx-2 sm:mx-3 md:mx-4 w-2 h-2 sm:w-3 sm:h-3 bg-white/60 rotate-45"></div>
-              <div className="h-0.5 w-12 sm:w-16 md:w-20 bg-white/40"></div>
-                    </div>
-            
-            {/* Salon name with creative styling */}
-            <div className="mb-4 sm:mb-6 md:mb-8">
-              <div className="inline-block px-3 sm:px-4 md:px-6 py-1.5 sm:py-2 mb-3 sm:mb-4 md:mb-6 bg-white/10 backdrop-blur-sm border border-white/20 rounded-full">
-                <span className="text-white/90 text-xs sm:text-sm font-semibold tracking-wider uppercase">Welcome To</span>
-                  </div>
-              <h1 className="text-3xl sm:text-4xl md:text-5xl lg:text-6xl xl:text-7xl 2xl:text-8xl font-black mb-2 sm:mb-3 md:mb-4 tracking-tighter">
-                <span className="block text-white [text-shadow:_4px_4px_0_rgb(0_0_0_/_40%)]">
-                  {salonName.split(' ').map((word, i) => (
-                    <span key={i} className="inline-block mr-4 relative">
-                      <span className="relative z-10">{word}</span>
-                      <span className="absolute inset-0 text-pink-400 blur-sm opacity-50 -z-0">{word}</span>
-                    </span>
-                  ))}
-                </span>
-              </h1>
-              
-              {/* Decorative underline */}
-              <div className="flex items-center justify-center gap-2 sm:gap-3 mt-3 sm:mt-4 md:mt-6">
-                <div className="w-6 sm:w-8 h-0.5 sm:h-1 bg-pink-400"></div>
-                <div className="w-1.5 h-1.5 sm:w-2 sm:h-2 bg-pink-400 rotate-45"></div>
-                <div className="w-12 sm:w-16 h-0.5 sm:h-1 bg-pink-400"></div>
-                <div className="w-1.5 h-1.5 sm:w-2 sm:h-2 bg-pink-400 rotate-45"></div>
-                <div className="w-6 sm:w-8 h-0.5 sm:h-1 bg-pink-400"></div>
-              </div>
-            </div>
+        <div className="relative w-full py-12 sm:py-16 md:py-20 lg:py-24 min-h-[400px] flex items-center justify-center">
+          <div className="absolute inset-0 flex items-center justify-center">
+            <div className="w-full max-w-4xl mx-auto px-4">
+              <div className="flex flex-col items-center justify-center space-y-4 sm:space-y-5 md:space-y-6 relative z-10">
+                {/* Top decorative line */}
+                <div className="flex items-center justify-center">
+                  <div className="h-px w-12 sm:w-16 bg-white/40"></div>
+                  <div className="mx-2 sm:mx-3 w-1.5 h-1.5 sm:w-2 sm:h-2 bg-white/60 rotate-45"></div>
+                  <div className="h-px w-12 sm:w-16 bg-white/40"></div>
+                </div>
+                
+                {/* Welcome badge */}
+                <div className="inline-block px-4 sm:px-5 py-1.5 sm:py-2 bg-white/10 backdrop-blur-sm border border-white/20 rounded-full">
+                  <span className="text-white/90 text-xs sm:text-sm font-semibold tracking-wider uppercase">Welcome To</span>
+                </div>
+                
+                {/* Salon name */}
+                <h1 className="text-3xl sm:text-4xl md:text-5xl lg:text-6xl font-black tracking-tight">
+                  <span className="text-white [text-shadow:_2px_2px_0_rgb(0_0_0_/_40%)]">
+                    {salonName}
+                  </span>
+                </h1>
+                
+                {/* Decorative underline */}
+                <div className="flex items-center justify-center gap-2 sm:gap-2.5">
+                  <div className="w-6 sm:w-8 h-px bg-pink-400"></div>
+                  <div className="w-1.5 h-1.5 bg-pink-400 rotate-45"></div>
+                  <div className="w-12 sm:w-16 h-px bg-pink-400"></div>
+                  <div className="w-1.5 h-1.5 bg-pink-400 rotate-45"></div>
+                  <div className="w-6 sm:w-8 h-px bg-pink-400"></div>
+                </div>
 
-            {/* Subtitle */}
-            <p className="text-base sm:text-lg md:text-xl lg:text-2xl xl:text-3xl text-white font-light tracking-wider mb-6 sm:mb-8 md:mb-10 uppercase px-2">
-              Book Your Appointment
-            </p>
-            
-            {/* Bottom decorative line */}
-            <div className="flex items-center justify-center">
-              <div className="h-0.5 w-12 sm:w-16 bg-white/40"></div>
-              <div className="mx-2 sm:mx-3 w-1.5 h-1.5 sm:w-2 sm:h-2 bg-white/60 rounded-full"></div>
-              <div className="h-0.5 w-12 sm:w-16 bg-white/40"></div>
+                {/* Subtitle */}
+                <p className="text-sm sm:text-base md:text-lg lg:text-xl text-white font-light tracking-widest uppercase">
+                  Book Your Appointment
+                </p>
+                
+                {/* Bottom decorative line */}
+                <div className="flex items-center justify-center">
+                  <div className="h-px w-12 sm:w-16 bg-white/40"></div>
+                  <div className="mx-2 sm:mx-3 w-1.5 h-1.5 sm:w-2 sm:h-2 bg-white/60 rounded-full"></div>
+                  <div className="h-px w-12 sm:w-16 bg-white/40"></div>
+                </div>
+              </div>
             </div>
           </div>
         </div>
@@ -1146,6 +1199,7 @@ function BookPageContent() {
                               onClick={() => {
                                 setBkBranchId(br.id);
                                 setBkServiceId(null);
+                                setBkSelectedServices([]);
                                 setBkStaffId(null);
                                 setBkDate(null);
                                 setBkTime(null);
@@ -1186,7 +1240,12 @@ function BookPageContent() {
                     <div className="w-10 h-10 sm:w-12 sm:h-12 bg-purple-500 flex items-center justify-center text-white border-2 border-purple-600">
                       <i className="fas fa-concierge-bell text-sm sm:text-base"></i>
                     </div>
-                    <span className="uppercase tracking-wide text-sm sm:text-base">Select Service</span>
+                    <div className="flex-1">
+                      <span className="uppercase tracking-wide text-sm sm:text-base">Select Services</span>
+                      {bkSelectedServices.length > 0 && (
+                        <span className="ml-2 text-xs text-purple-600 font-normal">({bkSelectedServices.length} selected)</span>
+                      )}
+                    </div>
                   </div>
                   {!bkBranchId ? (
                       <div className="border-2 sm:border-4 border-dashed border-purple-300 p-6 sm:p-8 md:p-10 text-center relative">
@@ -1214,13 +1273,18 @@ function BookPageContent() {
                           return srv.branches.includes(String(bkBranchId));
                         })
                           .map((srv: any, index: number) => {
-                          const selected = String(bkServiceId) === String(srv.id);
+                          const selected = bkSelectedServices.includes(srv.id);
                             return (
                               <button
                                 key={srv.id}
                                 onClick={() => {
-                                  setBkServiceId(srv.id);
-                                  setBkStaffId(null);
+                                  if (selected) {
+                                    // Remove service
+                                    setBkSelectedServices(bkSelectedServices.filter((id: number | string) => id !== srv.id));
+                                  } else {
+                                    // Add service
+                                    setBkSelectedServices([...bkSelectedServices, srv.id]);
+                                  }
                                   setBkDate(null);
                                   setBkTime(null);
                                 }}
@@ -1319,45 +1383,74 @@ function BookPageContent() {
                     </div>
                 </div>
 
-                {/* Time Selection */}
+                {/* Time Selection - Per Service */}
                 <div className="p-3 sm:p-4 md:p-6 border-2 sm:border-4 border-pink-500 bg-white shadow-lg">
                   <div className="font-bold text-slate-800 mb-3 sm:mb-4 flex items-center gap-2 sm:gap-3 text-base sm:text-lg">
                     <div className="w-10 h-10 sm:w-12 sm:h-12 bg-pink-500 flex items-center justify-center text-white border-2 border-pink-600">
                       <i className="fas fa-clock text-sm sm:text-base"></i>
                     </div>
-                    <span className="uppercase tracking-wide text-sm sm:text-base">Select a Time</span>
+                    <span className="uppercase tracking-wide text-sm sm:text-base">Select Time for Each Service</span>
                   </div>
-                    <div className="grid grid-cols-2 sm:grid-cols-3 md:grid-cols-4 gap-2 sm:gap-3 p-2 sm:p-3 border-2 sm:border-4 border-pink-300">
-                        {!bkDate ? (
-                        <div className="col-span-4 text-center text-slate-400 py-8 border-4 border-dashed border-pink-300 relative">
-                          <div className="absolute top-2 right-2 w-4 h-4 border-t-2 border-r-2 border-pink-300"></div>
-                          <div className="absolute bottom-2 left-2 w-4 h-4 border-b-2 border-l-2 border-pink-300"></div>
-                          <i className="fas fa-calendar-day text-3xl mb-2 block text-pink-300" />
-                          <p className="text-sm font-semibold">Select date first</p>
-                          </div>
-                        ) : computeSlots().length === 0 ? (
-                        <div className="col-span-4 text-center text-slate-400 py-8 border-4 border-dashed border-pink-300 relative">
-                          <div className="absolute top-2 right-2 w-4 h-4 border-t-2 border-r-2 border-pink-300"></div>
-                          <div className="absolute bottom-2 left-2 w-4 h-4 border-b-2 border-l-2 border-pink-300"></div>
-                          <i className="fas fa-clock text-3xl mb-2 block text-pink-300" />
-                          <p className="text-sm font-semibold">No slots available</p>
-                          </div>
-                        ) : (
-                          computeSlots().map((t) => (
-                            <button
-                              key={t}
-                              onClick={() => setBkTime(t)}
-                            className={`py-2 sm:py-3 px-1 sm:px-2 font-bold text-xs sm:text-sm transition-all border-2 sm:border-4 transform hover:scale-105 ${
-                                bkTime === t 
-                                ? "bg-pink-500 text-white border-pink-600 shadow-lg scale-105" 
-                                : "bg-white text-slate-700 border-pink-200 hover:border-pink-400 hover:bg-pink-50"
-                              }`}
-                            >
-                              {t}
-                            </button>
-                          ))
-                        )}
+                  
+                  {!bkDate ? (
+                    <div className="text-center text-slate-400 py-8 border-4 border-dashed border-pink-300 relative">
+                      <div className="absolute top-2 right-2 w-4 h-4 border-t-2 border-r-2 border-pink-300"></div>
+                      <div className="absolute bottom-2 left-2 w-4 h-4 border-b-2 border-l-2 border-pink-300"></div>
+                      <i className="fas fa-calendar-day text-3xl mb-2 block text-pink-300" />
+                      <p className="text-sm font-semibold">Select date first</p>
                     </div>
+                  ) : bkSelectedServices.length === 0 ? (
+                    <div className="text-center text-slate-400 py-8 border-4 border-dashed border-pink-300 relative">
+                      <div className="absolute top-2 right-2 w-4 h-4 border-t-2 border-r-2 border-pink-300"></div>
+                      <div className="absolute bottom-2 left-2 w-4 h-4 border-b-2 border-l-2 border-pink-300"></div>
+                      <i className="fas fa-concierge-bell text-3xl mb-2 block text-pink-300" />
+                      <p className="text-sm font-semibold">Select services first</p>
+                    </div>
+                  ) : (
+                    <div className="space-y-4">
+                      {bkSelectedServices.map((serviceId: number | string) => {
+                        const service = servicesList.find((s) => String(s.id) === String(serviceId));
+                        if (!service) return null;
+                        const slots = computeSlots(serviceId);
+                        const selectedTime = bkServiceTimes[String(serviceId)];
+                        
+                        return (
+                          <div key={String(serviceId)} className="border-2 border-purple-300 p-3 rounded-lg bg-purple-50/30">
+                            <div className="flex items-center justify-between mb-3">
+                              <div className="flex items-center gap-2">
+                                <i className="fas fa-cut text-purple-600"></i>
+                                <span className="font-bold text-slate-800 text-sm">{service.name}</span>
+                              </div>
+                              <span className="text-xs text-slate-600 bg-white px-2 py-1 rounded border border-purple-200">
+                                {service.duration} min
+                              </span>
+                            </div>
+                            <div className="grid grid-cols-3 sm:grid-cols-4 md:grid-cols-5 gap-2">
+                              {slots.length === 0 ? (
+                                <div className="col-span-full text-center text-slate-400 py-4 text-xs">
+                                  No slots available
+                                </div>
+                              ) : (
+                                slots.map((t) => (
+                                  <button
+                                    key={t}
+                                    onClick={() => setBkServiceTimes({ ...bkServiceTimes, [String(serviceId)]: t })}
+                                    className={`py-2 px-1 font-bold text-xs transition-all border-2 rounded ${
+                                      selectedTime === t 
+                                        ? "bg-pink-500 text-white border-pink-600 shadow-md" 
+                                        : "bg-white text-slate-700 border-pink-200 hover:border-pink-400 hover:bg-pink-50"
+                                    }`}
+                                  >
+                                    {t}
+                                  </button>
+                                ))
+                              )}
+                            </div>
+                          </div>
+                        );
+                      })}
+                    </div>
+                  )}
                 </div>
 
                 {/* Staff Selection */}
@@ -1600,9 +1693,30 @@ function BookPageContent() {
                         <span className="text-slate-600 font-semibold uppercase text-xs tracking-wide">Branch</span>
                         <span className="font-bold text-slate-800">{branches.find((b: any) => b.id === bkBranchId)?.name || <span className="text-slate-400">-</span>}</span>
                       </div>
-                      <div className="flex justify-between items-center py-2 border-b-2 border-pink-200">
-                        <span className="text-slate-600 font-semibold uppercase text-xs tracking-wide">Service</span>
-                        <span className="font-bold text-slate-800">{servicesList.find((s: any) => String(s.id) === String(bkServiceId))?.name || <span className="text-slate-400">-</span>}</span>
+                      <div className="py-2 border-b-2 border-pink-200">
+                        <span className="text-slate-600 font-semibold uppercase text-xs tracking-wide block mb-2">Services ({bkSelectedServices.length})</span>
+                        {bkSelectedServices.length === 0 ? (
+                          <span className="text-slate-400">-</span>
+                        ) : (
+                          <div className="space-y-1">
+                            {bkSelectedServices.map((serviceId: number | string) => {
+                              const service = servicesList.find((s: any) => String(s.id) === String(serviceId));
+                              const time = bkServiceTimes[String(serviceId)];
+                              return (
+                                <div key={String(serviceId)} className="flex justify-between items-center text-xs bg-purple-50 px-2 py-1 rounded">
+                                  <div className="flex flex-col">
+                                    <span className="font-bold text-slate-800">{service?.name || "Service"}</span>
+                                    {time && <span className="text-[10px] text-purple-600 mt-0.5">@ {time}</span>}
+                                  </div>
+                                  <div className="flex items-center gap-2">
+                                    <span className="text-purple-600">{service?.duration}min</span>
+                                    <span className="font-bold text-pink-600">${service?.price || 0}</span>
+                                  </div>
+                                </div>
+                              );
+                            })}
+                          </div>
+                        )}
                       </div>
                       <div className="flex justify-between items-center py-2 border-b-2 border-pink-200">
                         <span className="text-slate-600 font-semibold uppercase text-xs tracking-wide">Staff</span>
@@ -1616,10 +1730,22 @@ function BookPageContent() {
                         <span className="text-slate-600 font-semibold uppercase text-xs tracking-wide">Time</span>
                         <span className="font-bold text-slate-800">{bkTime || <span className="text-slate-400">-</span>}</span>
                       </div>
+                      <div className="flex justify-between items-center py-2 border-b-2 border-pink-200">
+                        <span className="text-slate-600 font-semibold uppercase text-xs tracking-wide">Total Duration</span>
+                        <span className="font-bold text-slate-800">
+                          {bkSelectedServices.reduce((sum: number, serviceId: number | string) => {
+                            const service = servicesList.find((s: any) => String(s.id) === String(serviceId));
+                            return sum + (Number(service?.duration) || 0);
+                          }, 0)} mins
+                        </span>
+                      </div>
                       <div className="flex justify-between items-center pt-3 mt-2 border-t-4 border-pink-500">
-                        <span className="text-slate-800 font-bold text-lg uppercase tracking-wide">Total</span>
+                        <span className="text-slate-800 font-bold text-lg uppercase tracking-wide">Total Price</span>
                         <span className="font-black text-3xl text-pink-600">
-                          ${servicesList.find((s: any) => String(s.id) === String(bkServiceId))?.price || 0}
+                          ${bkSelectedServices.reduce((sum: number, serviceId: number | string) => {
+                            const service = servicesList.find((s: any) => String(s.id) === String(serviceId));
+                            return sum + (Number(service?.price) || 0);
+                          }, 0)}
                         </span>
                       </div>
                     </div>
@@ -1627,16 +1753,16 @@ function BookPageContent() {
 
                 {/* Submit Button */}
                 <button
-                    disabled={!bkBranchId || !bkServiceId || !bkDate || !bkTime || submittingBooking || !currentCustomer}
+                    disabled={!bkBranchId || bkSelectedServices.length === 0 || !bkDate || Object.keys(bkServiceTimes).length !== bkSelectedServices.length || submittingBooking || !currentCustomer}
                     onClick={handleConfirmBooking}
                   className={`w-full px-4 sm:px-6 py-3 sm:py-4 md:py-5 text-white font-bold text-base sm:text-lg md:text-xl transition-all border-2 sm:border-4 relative overflow-hidden ${
-                    bkBranchId && bkServiceId && bkDate && bkTime && !submittingBooking && currentCustomer 
+                    bkBranchId && bkSelectedServices.length > 0 && bkDate && Object.keys(bkServiceTimes).length === bkSelectedServices.length && !submittingBooking && currentCustomer 
                       ? "bg-indigo-900 border-indigo-700 hover:bg-indigo-800 hover:border-indigo-600 active:scale-[0.98]" 
                       : "bg-slate-300 border-slate-400 cursor-not-allowed"
                   }`}
                 >
                   {/* Diagonal stripe pattern */}
-                  <div className={`absolute inset-0 opacity-10 ${bkBranchId && bkServiceId && bkDate && bkTime && !submittingBooking && currentCustomer ? "" : "hidden"}`} style={{
+                  <div className={`absolute inset-0 opacity-10 ${bkBranchId && bkSelectedServices.length > 0 && bkDate && Object.keys(bkServiceTimes).length === bkSelectedServices.length && !submittingBooking && currentCustomer ? "" : "hidden"}`} style={{
                     backgroundImage: `repeating-linear-gradient(45deg, transparent, transparent 10px, currentColor 10px, currentColor 11px)`,
                   }}></div>
                   
