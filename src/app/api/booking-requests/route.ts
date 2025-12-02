@@ -1,6 +1,7 @@
 import { NextRequest, NextResponse } from "next/server";
 import { adminDb } from "@/lib/firebaseAdmin";
 import { FieldValue } from "firebase-admin/firestore";
+import { generateBookingCode } from "@/lib/bookings";
 
 export const runtime = "nodejs";
 
@@ -53,6 +54,8 @@ export async function POST(req: NextRequest) {
       return NextResponse.json({ error: "Missing field: price" }, { status: 400 });
     }
 
+    const bookingCode = generateBookingCode();
+    
     const payload: any = {
       ownerUid: String(body.ownerUid),
       client: String(body.client),
@@ -70,6 +73,8 @@ export async function POST(req: NextRequest) {
       duration: Number(body.duration) || 0,
       status: body.status || "Pending",
       price: Number(body.price) || 0,
+      bookingSource: "booking_engine",
+      bookingCode: bookingCode,
       createdAt: FieldValue.serverTimestamp(),
       updatedAt: FieldValue.serverTimestamp(),
     };
@@ -77,7 +82,7 @@ export async function POST(req: NextRequest) {
     const db = adminDb();
     const ref = await db.collection("bookings").add(payload);
     
-    return NextResponse.json({ id: ref.id });
+    return NextResponse.json({ id: ref.id, bookingCode: bookingCode });
   } catch (e: any) {
     console.error("Create booking request API error:", e);
     const errorMessage = process.env.NODE_ENV === "production"

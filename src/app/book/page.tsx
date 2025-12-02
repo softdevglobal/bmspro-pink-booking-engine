@@ -25,6 +25,17 @@ function BookPageContent() {
   const [bkNotes, setBkNotes] = useState<string>("");
   const [submittingBooking, setSubmittingBooking] = useState<boolean>(false);
   const [showSuccess, setShowSuccess] = useState<boolean>(false);
+  const [bookingSummary, setBookingSummary] = useState<{
+    bookingCode?: string;
+    client: string;
+    serviceName: string;
+    branchName: string;
+    staffName: string;
+    date: string;
+    time: string;
+    price: number;
+    duration: number;
+  } | null>(null);
 
   // Real data from Firestore
   const [salonName, setSalonName] = useState<string>("Salon");
@@ -281,11 +292,14 @@ function BookPageContent() {
     }
     const serviceName = service?.name || "";
     const branchName = branches.find((b: any) => String(b.id) === String(bkBranchId))?.name || "";
-    const staffName = bkStaffId ? staffList.find((s: any) => String(s.id) === String(bkStaffId))?.name || "" : "";
+    const staffName = bkStaffId ? staffList.find((s: any) => String(s.id) === String(bkStaffId))?.name || "" : "Any Available";
     const client = bkClientName?.trim() || "Guest";
+    const bookingDate = formatLocalYmd(bkDate);
+    const bookingPrice = service?.price || 0;
+    const bookingDuration = service?.duration || 60;
     
     try {
-      await createBooking({
+      const result = await createBooking({
         ownerUid,
         client,
         clientEmail: bkClientEmail?.trim() || undefined,
@@ -297,11 +311,24 @@ function BookPageContent() {
         staffName: staffName || "Any Available",
         branchId: bkBranchId,
         branchName,
-        date: formatLocalYmd(bkDate),
+        date: bookingDate,
         time: bkTime,
-        duration: service?.duration || 60,
+        duration: bookingDuration,
         status: "Pending",
-        price: service?.price || 0,
+        price: bookingPrice,
+      });
+      
+      // Store booking summary for success popup
+      setBookingSummary({
+        bookingCode: result.bookingCode,
+        client,
+        serviceName,
+        branchName,
+        staffName: staffName || "Any Available",
+        date: bookingDate,
+        time: bkTime || "",
+        price: bookingPrice,
+        duration: bookingDuration,
       });
       
       setShowSuccess(true);
@@ -327,19 +354,59 @@ function BookPageContent() {
     );
   }
 
-  if (showSuccess) {
+  if (showSuccess && bookingSummary) {
     return (
-      <div className="min-h-screen flex items-center justify-center bg-gradient-to-br from-pink-50 to-purple-50">
-        <div className="bg-white rounded-2xl shadow-xl p-8 max-w-md w-full mx-4 text-center">
-          <i className="fas fa-check-circle text-6xl text-green-500 mb-4" />
-          <h2 className="text-2xl font-bold text-slate-800 mb-2">Booking Confirmed!</h2>
-          <p className="text-slate-600 mb-6">Your appointment has been successfully booked.</p>
+      <div className="min-h-screen flex items-center justify-center bg-gradient-to-br from-pink-50 to-purple-50 p-4">
+        <div className="bg-white rounded-2xl shadow-xl p-6 sm:p-8 max-w-lg w-full">
+          <div className="text-center mb-6">
+            <i className="fas fa-check-circle text-5xl sm:text-6xl text-green-500 mb-4" />
+            <h2 className="text-xl sm:text-2xl font-bold text-slate-800 mb-2">Booking Confirmed!</h2>
+            <p className="text-slate-600 text-sm sm:text-base">Your appointment has been successfully booked.</p>
+          </div>
+          
+          {/* Booking Summary */}
+          <div className="border-2 sm:border-4 border-pink-300 rounded-lg p-4 sm:p-5 bg-pink-50 mb-6">
+            <div className="space-y-3 text-sm sm:text-base">
+              {bookingSummary.bookingCode && (
+                <div className="flex items-center justify-between pb-2 border-b-2 border-pink-200">
+                  <span className="text-slate-600 font-semibold uppercase text-xs tracking-wide">Booking Code</span>
+                  <span className="font-mono font-bold text-slate-800">{bookingSummary.bookingCode}</span>
+                </div>
+              )}
+              <div className="flex items-center justify-between py-2 border-b-2 border-pink-200">
+                <span className="text-slate-600 font-semibold uppercase text-xs tracking-wide">Service</span>
+                <span className="font-bold text-slate-800 text-right">{bookingSummary.serviceName}</span>
+              </div>
+              <div className="flex items-center justify-between py-2 border-b-2 border-pink-200">
+                <span className="text-slate-600 font-semibold uppercase text-xs tracking-wide">Branch</span>
+                <span className="font-bold text-slate-800 text-right">{bookingSummary.branchName}</span>
+              </div>
+              <div className="flex items-center justify-between py-2 border-b-2 border-pink-200">
+                <span className="text-slate-600 font-semibold uppercase text-xs tracking-wide">Staff</span>
+                <span className="font-bold text-slate-800 text-right">{bookingSummary.staffName}</span>
+              </div>
+              <div className="flex items-center justify-between py-2 border-b-2 border-pink-200">
+                <span className="text-slate-600 font-semibold uppercase text-xs tracking-wide">Date & Time</span>
+                <span className="font-bold text-slate-800 text-right">{new Date(bookingSummary.date).toLocaleDateString()} {bookingSummary.time}</span>
+              </div>
+              <div className="flex items-center justify-between py-2 border-b-2 border-pink-200">
+                <span className="text-slate-600 font-semibold uppercase text-xs tracking-wide">Duration</span>
+                <span className="font-bold text-slate-800">{bookingSummary.duration} mins</span>
+              </div>
+              <div className="flex items-center justify-between pt-3 mt-2 border-t-4 border-pink-500">
+                <span className="text-slate-800 font-bold text-base sm:text-lg uppercase tracking-wide">Total</span>
+                <span className="font-black text-2xl sm:text-3xl text-pink-600">${bookingSummary.price}</span>
+              </div>
+            </div>
+          </div>
+          
           <button
             onClick={() => {
               resetBooking();
               setShowSuccess(false);
+              setBookingSummary(null);
             }}
-            className="px-6 py-3 bg-indigo-900 hover:bg-indigo-800 text-white font-semibold rounded-lg transition-all transform hover:scale-105"
+            className="w-full px-6 py-3 bg-indigo-900 hover:bg-indigo-800 text-white font-semibold rounded-lg transition-all transform hover:scale-105"
           >
             OK
           </button>
