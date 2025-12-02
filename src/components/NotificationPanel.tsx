@@ -117,27 +117,47 @@ export default function NotificationPanel({
   const formatDate = (timestamp: any) => {
     if (!timestamp) return "";
 
-    let date: Date;
-    if (timestamp.seconds) {
-      date = new Date(timestamp.seconds * 1000);
-    } else if (timestamp.toDate) {
-      date = timestamp.toDate();
-    } else {
-      date = new Date(timestamp);
+    try {
+      let date: Date;
+      
+      // Handle Firestore Timestamp with seconds
+      if (timestamp.seconds !== undefined) {
+        date = new Date(timestamp.seconds * 1000);
+      } 
+      // Handle Firestore Timestamp with nanoseconds
+      else if (timestamp._seconds !== undefined) {
+        date = new Date(timestamp._seconds * 1000);
+      }
+      // Handle Firestore Timestamp with toDate method
+      else if (typeof timestamp.toDate === 'function') {
+        date = timestamp.toDate();
+      }
+      // Handle string or number timestamps
+      else {
+        date = new Date(timestamp);
+      }
+
+      // Check if date is valid
+      if (isNaN(date.getTime())) {
+        return "Recently";
+      }
+
+      const now = new Date();
+      const diffMs = now.getTime() - date.getTime();
+      const diffMins = Math.floor(diffMs / 60000);
+      const diffHours = Math.floor(diffMs / 3600000);
+      const diffDays = Math.floor(diffMs / 86400000);
+
+      if (diffMins < 1) return "Just now";
+      if (diffMins < 60) return `${diffMins}m ago`;
+      if (diffHours < 24) return `${diffHours}h ago`;
+      if (diffDays < 7) return `${diffDays}d ago`;
+
+      return date.toLocaleDateString();
+    } catch (error) {
+      console.error("Error formatting date:", error, timestamp);
+      return "Recently";
     }
-
-    const now = new Date();
-    const diffMs = now.getTime() - date.getTime();
-    const diffMins = Math.floor(diffMs / 60000);
-    const diffHours = Math.floor(diffMs / 3600000);
-    const diffDays = Math.floor(diffMs / 86400000);
-
-    if (diffMins < 1) return "Just now";
-    if (diffMins < 60) return `${diffMins}m ago`;
-    if (diffHours < 24) return `${diffHours}h ago`;
-    if (diffDays < 7) return `${diffDays}d ago`;
-
-    return date.toLocaleDateString();
   };
 
   const unreadCount = notifications.filter((n) => !n.read).length;

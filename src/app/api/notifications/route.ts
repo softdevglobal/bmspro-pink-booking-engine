@@ -39,10 +39,15 @@ export async function GET(req: NextRequest) {
       .limit(limitCount)
       .get();
 
-    const notifications = snapshot.docs.map((doc) => ({
-      id: doc.id,
-      ...doc.data(),
-    }));
+    const notifications = snapshot.docs.map((doc) => {
+      const data = doc.data();
+      return {
+        id: doc.id,
+        ...data,
+        // Convert Firestore Timestamp to serializable format
+        createdAt: data.createdAt?.toDate?.()?.toISOString() || data.createdAt,
+      };
+    });
 
     return NextResponse.json({ notifications });
   } catch (error: any) {
