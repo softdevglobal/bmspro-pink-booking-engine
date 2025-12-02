@@ -22,30 +22,66 @@ export type BookingInput = {
 };
 
 export async function createBooking(input: BookingInput): Promise<{ id: string }> {
-  const payload = {
-    ownerUid: input.ownerUid,
-    client: input.client,
-    clientEmail: input.clientEmail || null,
-    clientPhone: input.clientPhone || null,
-    notes: input.notes || null,
-    serviceId: typeof input.serviceId === "number" ? input.serviceId : String(input.serviceId),
-    serviceName: input.serviceName || null,
-    staffId: input.staffId || null,
-    staffName: input.staffName || null,
-    branchId: String(input.branchId),
-    branchName: input.branchName || null,
-    date: String(input.date),
-    time: String(input.time),
-    duration: Number(input.duration) || 0,
-    status: input.status || "Pending",
-    price: Number(input.price) || 0,
-    createdAt: serverTimestamp(),
-    updatedAt: serverTimestamp(),
-  };
-  
-  // Save to bookingRequests collection instead of bookings
-  const ref = await addDoc(collection(db, "bookingRequests"), payload as any);
-  return { id: ref.id };
+  try {
+    // Try API route first (uses Firebase Admin SDK, bypasses security rules)
+    const res = await fetch("/api/booking-requests", {
+      method: "POST",
+      headers: {
+        "Content-Type": "application/json",
+      },
+      body: JSON.stringify({
+        ownerUid: input.ownerUid,
+        client: input.client,
+        clientEmail: input.clientEmail || undefined,
+        clientPhone: input.clientPhone || undefined,
+        notes: input.notes || undefined,
+        serviceId: input.serviceId,
+        serviceName: input.serviceName || undefined,
+        staffId: input.staffId || null,
+        staffName: input.staffName || undefined,
+        branchId: input.branchId,
+        branchName: input.branchName || undefined,
+        date: input.date,
+        time: input.time,
+        duration: input.duration,
+        status: input.status || "Pending",
+        price: input.price,
+      }),
+    });
+
+    const json = await res.json();
+    if (!res.ok) {
+      throw new Error(json?.error || "Failed to create booking");
+    }
+    return { id: json.id };
+  } catch (error) {
+    console.error("Error creating booking via API:", error);
+    // Fallback: try direct client write (will fail if security rules don't allow)
+    const payload = {
+      ownerUid: input.ownerUid,
+      client: input.client,
+      clientEmail: input.clientEmail || null,
+      clientPhone: input.clientPhone || null,
+      notes: input.notes || null,
+      serviceId: typeof input.serviceId === "number" ? input.serviceId : String(input.serviceId),
+      serviceName: input.serviceName || null,
+      staffId: input.staffId || null,
+      staffName: input.staffName || null,
+      branchId: String(input.branchId),
+      branchName: input.branchName || null,
+      date: String(input.date),
+      time: String(input.time),
+      duration: Number(input.duration) || 0,
+      status: input.status || "Pending",
+      price: Number(input.price) || 0,
+      createdAt: serverTimestamp(),
+      updatedAt: serverTimestamp(),
+    };
+    
+    // Save to bookings collection
+    const ref = await addDoc(collection(db, "bookings"), payload as any);
+    return { id: ref.id };
+  }
 }
 
 /**

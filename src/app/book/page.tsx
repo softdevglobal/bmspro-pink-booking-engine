@@ -305,10 +305,6 @@ function BookPageContent() {
       });
       
       setShowSuccess(true);
-      setTimeout(() => {
-        resetBooking();
-        setShowSuccess(false);
-      }, 3000);
     } catch (error) {
       console.error("Error creating booking:", error);
       alert("Failed to create booking. Please try again.");
@@ -337,7 +333,16 @@ function BookPageContent() {
         <div className="bg-white rounded-2xl shadow-xl p-8 max-w-md w-full mx-4 text-center">
           <i className="fas fa-check-circle text-6xl text-green-500 mb-4" />
           <h2 className="text-2xl font-bold text-slate-800 mb-2">Booking Confirmed!</h2>
-          <p className="text-slate-600">Your appointment has been successfully booked.</p>
+          <p className="text-slate-600 mb-6">Your appointment has been successfully booked.</p>
+          <button
+            onClick={() => {
+              resetBooking();
+              setShowSuccess(false);
+            }}
+            className="px-6 py-3 bg-indigo-900 hover:bg-indigo-800 text-white font-semibold rounded-lg transition-all transform hover:scale-105"
+          >
+            OK
+          </button>
         </div>
       </div>
     );
@@ -414,21 +419,21 @@ function BookPageContent() {
         <div className="absolute bottom-0 left-0 w-24 h-24 border-b-4 border-l-4 border-white/20"></div>
         <div className="absolute bottom-0 right-0 w-24 h-24 border-b-4 border-r-4 border-white/20"></div>
         
-        <div className="relative max-w-7xl mx-auto px-4 py-20 sm:py-24">
+        <div className="relative max-w-7xl mx-auto px-3 sm:px-4 py-12 sm:py-16 md:py-20 lg:py-24">
           <div className="text-center relative z-10">
             {/* Top decorative line */}
-            <div className="flex items-center justify-center mb-8">
-              <div className="h-0.5 w-20 bg-white/40"></div>
-              <div className="mx-4 w-3 h-3 bg-white/60 rotate-45"></div>
-              <div className="h-0.5 w-20 bg-white/40"></div>
+            <div className="flex items-center justify-center mb-4 sm:mb-6 md:mb-8">
+              <div className="h-0.5 w-12 sm:w-16 md:w-20 bg-white/40"></div>
+              <div className="mx-2 sm:mx-3 md:mx-4 w-2 h-2 sm:w-3 sm:h-3 bg-white/60 rotate-45"></div>
+              <div className="h-0.5 w-12 sm:w-16 md:w-20 bg-white/40"></div>
                     </div>
             
             {/* Salon name with creative styling */}
-            <div className="mb-8">
-              <div className="inline-block px-6 py-2 mb-6 bg-white/10 backdrop-blur-sm border border-white/20 rounded-full">
-                <span className="text-white/90 text-sm font-semibold tracking-wider uppercase">Welcome To</span>
+            <div className="mb-4 sm:mb-6 md:mb-8">
+              <div className="inline-block px-3 sm:px-4 md:px-6 py-1.5 sm:py-2 mb-3 sm:mb-4 md:mb-6 bg-white/10 backdrop-blur-sm border border-white/20 rounded-full">
+                <span className="text-white/90 text-xs sm:text-sm font-semibold tracking-wider uppercase">Welcome To</span>
                   </div>
-              <h1 className="text-6xl sm:text-7xl md:text-8xl lg:text-9xl font-black mb-4 tracking-tighter">
+              <h1 className="text-3xl sm:text-4xl md:text-5xl lg:text-6xl xl:text-7xl 2xl:text-8xl font-black mb-2 sm:mb-3 md:mb-4 tracking-tighter">
                 <span className="block text-white [text-shadow:_4px_4px_0_rgb(0_0_0_/_40%)]">
                   {salonName.split(' ').map((word, i) => (
                     <span key={i} className="inline-block mr-4 relative">
@@ -440,25 +445,25 @@ function BookPageContent() {
               </h1>
               
               {/* Decorative underline */}
-              <div className="flex items-center justify-center gap-3 mt-6">
-                <div className="w-8 h-1 bg-pink-400"></div>
-                <div className="w-2 h-2 bg-pink-400 rotate-45"></div>
-                <div className="w-16 h-1 bg-pink-400"></div>
-                <div className="w-2 h-2 bg-pink-400 rotate-45"></div>
-                <div className="w-8 h-1 bg-pink-400"></div>
+              <div className="flex items-center justify-center gap-2 sm:gap-3 mt-3 sm:mt-4 md:mt-6">
+                <div className="w-6 sm:w-8 h-0.5 sm:h-1 bg-pink-400"></div>
+                <div className="w-1.5 h-1.5 sm:w-2 sm:h-2 bg-pink-400 rotate-45"></div>
+                <div className="w-12 sm:w-16 h-0.5 sm:h-1 bg-pink-400"></div>
+                <div className="w-1.5 h-1.5 sm:w-2 sm:h-2 bg-pink-400 rotate-45"></div>
+                <div className="w-6 sm:w-8 h-0.5 sm:h-1 bg-pink-400"></div>
               </div>
             </div>
 
             {/* Subtitle */}
-            <p className="text-xl sm:text-2xl md:text-3xl text-white font-light tracking-wider mb-10 uppercase">
+            <p className="text-base sm:text-lg md:text-xl lg:text-2xl xl:text-3xl text-white font-light tracking-wider mb-6 sm:mb-8 md:mb-10 uppercase px-2">
               Book Your Appointment
             </p>
             
             {/* Bottom decorative line */}
             <div className="flex items-center justify-center">
-              <div className="h-0.5 w-16 bg-white/40"></div>
-              <div className="mx-3 w-2 h-2 bg-white/60 rounded-full"></div>
-              <div className="h-0.5 w-16 bg-white/40"></div>
+              <div className="h-0.5 w-12 sm:w-16 bg-white/40"></div>
+              <div className="mx-2 sm:mx-3 w-1.5 h-1.5 sm:w-2 sm:h-2 bg-white/60 rounded-full"></div>
+              <div className="h-0.5 w-12 sm:w-16 bg-white/40"></div>
             </div>
           </div>
         </div>
@@ -470,20 +475,20 @@ function BookPageContent() {
         </div>
       </div>
 
-      <div className="max-w-7xl mx-auto px-4 py-8 -mt-6 relative z-10">
+      <div className="max-w-7xl mx-auto px-3 sm:px-4 py-4 sm:py-6 md:py-8 -mt-6 relative z-10">
         {/* Single Page Booking Form */}
-        <div className="grid grid-cols-1 lg:grid-cols-2 gap-10 lg:gap-16">
+        <div className="grid grid-cols-1 lg:grid-cols-2 gap-6 sm:gap-8 lg:gap-10 xl:gap-16">
               {/* Left Column: Selection & Scheduling */}
-              <div className="space-y-8">
+              <div className="space-y-4 sm:space-y-6 md:space-y-8">
                 {/* Branch Selection */}
-                <div className="p-6 border-4 border-pink-500 bg-white shadow-lg">
-                  <div className="font-bold text-slate-800 mb-4 flex items-center gap-3 text-lg">
-                    <div className="w-12 h-12 bg-pink-500 flex items-center justify-center text-white border-2 border-pink-600">
-                      <i className="fas fa-map-marker-alt text-base"></i>
+                <div className="p-3 sm:p-4 md:p-6 border-2 sm:border-4 border-pink-500 bg-white shadow-lg">
+                  <div className="font-bold text-slate-800 mb-3 sm:mb-4 flex items-center gap-2 sm:gap-3 text-base sm:text-lg">
+                    <div className="w-10 h-10 sm:w-12 sm:h-12 bg-pink-500 flex items-center justify-center text-white border-2 border-pink-600">
+                      <i className="fas fa-map-marker-alt text-sm sm:text-base"></i>
                     </div>
-                    <span className="uppercase tracking-wide">Select Location</span>
+                    <span className="uppercase tracking-wide text-sm sm:text-base">Select Location</span>
                   </div>
-                    <div className="grid grid-cols-1 gap-4">
+                    <div className="grid grid-cols-1 gap-3 sm:gap-4">
                       {branches.length === 0 ? (
                         <div className="border-4 border-dashed border-pink-300 p-8 text-center relative">
                           <div className="absolute top-2 right-2 w-4 h-4 border-t-2 border-r-2 border-pink-300"></div>
@@ -504,7 +509,7 @@ function BookPageContent() {
                                 setBkDate(null);
                                 setBkTime(null);
                               }}
-                              className={`text-left border-4 p-5 hover:shadow-xl transition-all relative ${
+                              className={`text-left border-2 sm:border-4 p-3 sm:p-4 md:p-5 hover:shadow-xl transition-all relative ${
                                 selected 
                                   ? "border-pink-500 bg-pink-50 shadow-lg" 
                                   : "border-slate-300 bg-white hover:border-pink-400"
@@ -535,15 +540,15 @@ function BookPageContent() {
                 </div>
 
                 {/* Service Selection */}
-                <div className={`p-6 border-4 border-purple-500 bg-white shadow-lg ${!bkBranchId ? "opacity-50 pointer-events-none" : ""}`}>
-                  <div className="font-bold text-slate-800 mb-5 flex items-center gap-3 text-xl">
-                    <div className="w-12 h-12 bg-purple-500 flex items-center justify-center text-white border-2 border-purple-600">
-                      <i className="fas fa-concierge-bell text-base"></i>
+                <div className={`p-3 sm:p-4 md:p-6 border-2 sm:border-4 border-purple-500 bg-white shadow-lg ${!bkBranchId ? "opacity-50 pointer-events-none" : ""}`}>
+                  <div className="font-bold text-slate-800 mb-3 sm:mb-4 md:mb-5 flex items-center gap-2 sm:gap-3 text-lg sm:text-xl">
+                    <div className="w-10 h-10 sm:w-12 sm:h-12 bg-purple-500 flex items-center justify-center text-white border-2 border-purple-600">
+                      <i className="fas fa-concierge-bell text-sm sm:text-base"></i>
                     </div>
-                    <span className="uppercase tracking-wide">Select Service</span>
+                    <span className="uppercase tracking-wide text-sm sm:text-base">Select Service</span>
                   </div>
                   {!bkBranchId ? (
-                      <div className="border-4 border-dashed border-purple-300 p-10 text-center relative">
+                      <div className="border-2 sm:border-4 border-dashed border-purple-300 p-6 sm:p-8 md:p-10 text-center relative">
                         <div className="absolute top-2 right-2 w-4 h-4 border-t-2 border-r-2 border-purple-300"></div>
                         <div className="absolute bottom-2 left-2 w-4 h-4 border-b-2 border-l-2 border-purple-300"></div>
                         <div className="w-20 h-20 border-2 border-purple-300 mx-auto mb-4 flex items-center justify-center">
@@ -561,7 +566,7 @@ function BookPageContent() {
                         <p className="text-slate-600 font-semibold">No services available</p>
                     </div>
                   ) : (
-                      <div className="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-3 gap-4">
+                      <div className="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-3 gap-3 sm:gap-4">
                       {servicesList
                         .filter((srv: any) => {
                           if (!srv.branches || srv.branches.length === 0) return true;
@@ -621,25 +626,25 @@ function BookPageContent() {
                 </div>
 
                 {/* Date Selection */}
-                <div className="p-6 border-4 border-indigo-500 bg-white shadow-lg">
-                  <div className="flex items-center justify-between mb-4">
-                    <div className="font-bold text-slate-800 flex items-center gap-3 text-lg">
-                      <div className="w-12 h-12 bg-indigo-500 flex items-center justify-center text-white border-2 border-indigo-600">
-                        <i className="fas fa-calendar text-base"></i>
+                <div className="p-3 sm:p-4 md:p-6 border-2 sm:border-4 border-indigo-500 bg-white shadow-lg">
+                  <div className="flex flex-col sm:flex-row items-start sm:items-center justify-between mb-3 sm:mb-4 gap-3 sm:gap-0">
+                    <div className="font-bold text-slate-800 flex items-center gap-2 sm:gap-3 text-base sm:text-lg">
+                      <div className="w-10 h-10 sm:w-12 sm:h-12 bg-indigo-500 flex items-center justify-center text-white border-2 border-indigo-600">
+                        <i className="fas fa-calendar text-sm sm:text-base"></i>
                       </div>
-                      <span className="uppercase tracking-wide">Pick a Date</span>
+                      <span className="uppercase tracking-wide text-sm sm:text-base">Pick a Date</span>
                     </div>
-                      <div className="flex items-center gap-2">
-                        <button onClick={goPrevMonth} className="w-10 h-10 border-2 border-indigo-300 hover:bg-indigo-100 hover:border-indigo-500 text-slate-700 text-sm transition-all transform hover:scale-110">
+                      <div className="flex items-center gap-2 w-full sm:w-auto">
+                        <button onClick={goPrevMonth} className="w-8 h-8 sm:w-10 sm:h-10 border-2 border-indigo-300 hover:bg-indigo-100 hover:border-indigo-500 text-slate-700 text-xs sm:text-sm transition-all transform hover:scale-110">
                             <i className="fas fa-chevron-left" />
                           </button>
-                        <div className="text-sm font-bold text-slate-800 px-4 min-w-[140px] text-center border-2 border-indigo-300 py-2">{monthName}</div>
-                        <button onClick={goNextMonth} className="w-10 h-10 border-2 border-indigo-300 hover:bg-indigo-100 hover:border-indigo-500 text-slate-700 text-sm transition-all transform hover:scale-110">
+                        <div className="text-xs sm:text-sm font-bold text-slate-800 px-2 sm:px-4 min-w-[120px] sm:min-w-[140px] text-center border-2 border-indigo-300 py-1 sm:py-2 flex-1 sm:flex-initial">{monthName}</div>
+                        <button onClick={goNextMonth} className="w-8 h-8 sm:w-10 sm:h-10 border-2 border-indigo-300 hover:bg-indigo-100 hover:border-indigo-500 text-slate-700 text-xs sm:text-sm transition-all transform hover:scale-110">
                             <i className="fas fa-chevron-right" />
                           </button>
                         </div>
                       </div>
-                    <div className="border-4 border-indigo-300 overflow-hidden">
+                    <div className="border-2 sm:border-4 border-indigo-300 overflow-hidden w-full">
                       <div className="grid grid-cols-7 text-xs font-bold bg-indigo-100 border-b-2 border-indigo-300 text-indigo-700">
                           {["S", "M", "T", "W", "T", "F", "S"].map((d, i) => (
                           <div key={i} className="px-2 py-3 text-center border-r border-indigo-200 last:border-r-0">{d}</div>
@@ -656,7 +661,7 @@ function BookPageContent() {
                           return (
                             <div
                               key={idx}
-                              className={`h-14 p-1 text-sm flex items-center justify-center ${baseClickable} ${
+                              className={`h-10 sm:h-12 md:h-14 p-1 text-xs sm:text-sm flex items-center justify-center ${baseClickable} ${
                                 isSelected 
                                   ? "bg-pink-500 text-white font-bold border-4 border-pink-600 hover:bg-pink-600" 
                                   : isToday 
@@ -674,14 +679,14 @@ function BookPageContent() {
                 </div>
 
                 {/* Time Selection */}
-                <div className="p-6 border-4 border-pink-500 bg-white shadow-lg">
-                  <div className="font-bold text-slate-800 mb-4 flex items-center gap-3 text-lg">
-                    <div className="w-12 h-12 bg-pink-500 flex items-center justify-center text-white border-2 border-pink-600">
-                      <i className="fas fa-clock text-base"></i>
+                <div className="p-3 sm:p-4 md:p-6 border-2 sm:border-4 border-pink-500 bg-white shadow-lg">
+                  <div className="font-bold text-slate-800 mb-3 sm:mb-4 flex items-center gap-2 sm:gap-3 text-base sm:text-lg">
+                    <div className="w-10 h-10 sm:w-12 sm:h-12 bg-pink-500 flex items-center justify-center text-white border-2 border-pink-600">
+                      <i className="fas fa-clock text-sm sm:text-base"></i>
                     </div>
-                    <span className="uppercase tracking-wide">Select a Time</span>
+                    <span className="uppercase tracking-wide text-sm sm:text-base">Select a Time</span>
                   </div>
-                    <div className="grid grid-cols-4 gap-3 p-3 border-4 border-pink-300">
+                    <div className="grid grid-cols-2 sm:grid-cols-3 md:grid-cols-4 gap-2 sm:gap-3 p-2 sm:p-3 border-2 sm:border-4 border-pink-300">
                         {!bkDate ? (
                         <div className="col-span-4 text-center text-slate-400 py-8 border-4 border-dashed border-pink-300 relative">
                           <div className="absolute top-2 right-2 w-4 h-4 border-t-2 border-r-2 border-pink-300"></div>
@@ -701,7 +706,7 @@ function BookPageContent() {
                             <button
                               key={t}
                               onClick={() => setBkTime(t)}
-                            className={`py-3 px-2 font-bold text-sm transition-all border-4 transform hover:scale-105 ${
+                            className={`py-2 sm:py-3 px-1 sm:px-2 font-bold text-xs sm:text-sm transition-all border-2 sm:border-4 transform hover:scale-105 ${
                                 bkTime === t 
                                 ? "bg-pink-500 text-white border-pink-600 shadow-lg scale-105" 
                                 : "bg-white text-slate-700 border-pink-200 hover:border-pink-400 hover:bg-pink-50"
@@ -715,14 +720,14 @@ function BookPageContent() {
                 </div>
 
                 {/* Staff Selection */}
-                <div className={`p-6 border-4 border-amber-500 bg-white shadow-lg ${!bkDate || !bkTime ? "opacity-50 pointer-events-none" : ""}`}>
-                  <div className="font-bold text-slate-800 mb-4 flex items-center gap-3 text-lg">
-                    <div className="w-12 h-12 bg-amber-500 flex items-center justify-center text-white border-2 border-amber-600">
-                      <i className="fas fa-user-tie text-base"></i>
+                <div className={`p-3 sm:p-4 md:p-6 border-2 sm:border-4 border-amber-500 bg-white shadow-lg ${!bkDate || !bkTime ? "opacity-50 pointer-events-none" : ""}`}>
+                  <div className="font-bold text-slate-800 mb-3 sm:mb-4 flex items-center gap-2 sm:gap-3 text-base sm:text-lg">
+                    <div className="w-10 h-10 sm:w-12 sm:h-12 bg-amber-500 flex items-center justify-center text-white border-2 border-amber-600">
+                      <i className="fas fa-user-tie text-sm sm:text-base"></i>
                     </div>
-                    <span className="uppercase tracking-wide">Choose Stylist <span className="text-sm font-normal text-slate-500 normal-case">(Optional)</span></span>
+                    <span className="uppercase tracking-wide text-sm sm:text-base">Choose Stylist <span className="text-xs sm:text-sm font-normal text-slate-500 normal-case">(Optional)</span></span>
                   </div>
-                    <div className="space-y-3 max-h-[250px] overflow-y-auto">
+                    <div className="space-y-2 sm:space-y-3 max-h-[200px] sm:max-h-[250px] overflow-y-auto">
                       {!bkDate || !bkTime ? (
                         <div className="border-4 border-dashed border-amber-300 p-6 text-center relative">
                           <div className="absolute top-2 right-2 w-4 h-4 border-t-2 border-r-2 border-amber-300"></div>
@@ -749,7 +754,7 @@ function BookPageContent() {
                               <button
                                 key={st.id}
                                 onClick={() => setBkStaffId(st.id)}
-                                className={`w-full text-left border-4 p-4 hover:shadow-xl transition-all ${
+                                className={`w-full text-left border-2 sm:border-4 p-3 sm:p-4 hover:shadow-xl transition-all ${
                                   selected 
                                     ? "border-amber-500 bg-amber-50 shadow-lg" 
                                     : "border-slate-300 bg-white hover:border-amber-400"
@@ -781,16 +786,16 @@ function BookPageContent() {
               </div>
 
               {/* Right Column: Customer Details & Summary */}
-              <div className="space-y-8">
+              <div className="space-y-4 sm:space-y-6 md:space-y-8">
                 {/* Customer Details */}
-                <div className="p-6 border-4 border-slate-500 bg-white shadow-lg">
-                  <div className="font-bold text-slate-800 mb-5 flex items-center gap-3 text-xl">
-                    <div className="w-12 h-12 bg-slate-500 flex items-center justify-center text-white border-2 border-slate-600">
-                      <i className="fas fa-user text-base"></i>
+                <div className="p-3 sm:p-4 md:p-6 border-2 sm:border-4 border-slate-500 bg-white shadow-lg">
+                  <div className="font-bold text-slate-800 mb-3 sm:mb-4 md:mb-5 flex items-center gap-2 sm:gap-3 text-lg sm:text-xl">
+                    <div className="w-10 h-10 sm:w-12 sm:h-12 bg-slate-500 flex items-center justify-center text-white border-2 border-slate-600">
+                      <i className="fas fa-user text-sm sm:text-base"></i>
                     </div>
-                    <span className="uppercase tracking-wide">Your Details</span>
+                    <span className="uppercase tracking-wide text-sm sm:text-base">Your Details</span>
                   </div>
-                  <div className="space-y-4">
+                  <div className="space-y-3 sm:space-y-4">
                     <div>
                         <label className="block text-sm font-semibold text-slate-700 mb-2 flex items-center gap-2">
                           <i className="fas fa-user text-pink-500"></i>
@@ -848,14 +853,14 @@ function BookPageContent() {
                 </div>
 
                 {/* Booking Summary */}
-                <div className="p-6 border-4 border-pink-500 bg-white shadow-lg">
-                  <div className="font-bold text-slate-800 mb-5 flex items-center gap-3 text-xl">
-                    <div className="w-12 h-12 bg-pink-500 flex items-center justify-center text-white border-2 border-pink-600">
-                      <i className="fas fa-receipt text-base"></i>
+                <div className="p-3 sm:p-4 md:p-6 border-2 sm:border-4 border-pink-500 bg-white shadow-lg">
+                  <div className="font-bold text-slate-800 mb-3 sm:mb-4 md:mb-5 flex items-center gap-2 sm:gap-3 text-lg sm:text-xl">
+                    <div className="w-10 h-10 sm:w-12 sm:h-12 bg-pink-500 flex items-center justify-center text-white border-2 border-pink-600">
+                      <i className="fas fa-receipt text-sm sm:text-base"></i>
                     </div>
-                    <span className="uppercase tracking-wide">Booking Summary</span>
+                    <span className="uppercase tracking-wide text-sm sm:text-base">Booking Summary</span>
                   </div>
-                  <div className="border-4 border-pink-300 p-5 space-y-3 text-sm bg-pink-50">
+                  <div className="border-2 sm:border-4 border-pink-300 p-3 sm:p-4 md:p-5 space-y-2 sm:space-y-3 text-xs sm:text-sm bg-pink-50">
                       <div className="flex justify-between items-center py-2 border-b-2 border-pink-200">
                         <span className="text-slate-600 font-semibold uppercase text-xs tracking-wide">Branch</span>
                         <span className="font-bold text-slate-800">{branches.find((b: any) => b.id === bkBranchId)?.name || <span className="text-slate-400">-</span>}</span>
@@ -889,7 +894,7 @@ function BookPageContent() {
                 <button
                     disabled={!bkBranchId || !bkServiceId || !bkDate || !bkTime || submittingBooking || !bkClientName.trim()}
                     onClick={handleConfirmBooking}
-                  className={`w-full px-6 py-5 text-white font-bold text-xl transition-all border-4 relative overflow-hidden ${
+                  className={`w-full px-4 sm:px-6 py-3 sm:py-4 md:py-5 text-white font-bold text-base sm:text-lg md:text-xl transition-all border-2 sm:border-4 relative overflow-hidden ${
                     bkBranchId && bkServiceId && bkDate && bkTime && !submittingBooking && bkClientName.trim() 
                       ? "bg-indigo-900 border-indigo-700 hover:bg-indigo-800 hover:border-indigo-600 active:scale-[0.98]" 
                       : "bg-slate-300 border-slate-400 cursor-not-allowed"
