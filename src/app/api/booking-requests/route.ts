@@ -22,6 +22,7 @@ type CreateBookingRequestInput = {
   duration: number;
   status?: string;
   price: number;
+  customerUid?: string; // Customer account UID (for authenticated bookings)
 };
 
 export async function POST(req: NextRequest) {
@@ -73,6 +74,7 @@ export async function POST(req: NextRequest) {
       duration: Number(body.duration) || 0,
       status: body.status || "Pending",
       price: Number(body.price) || 0,
+      customerUid: body.customerUid || null,
       bookingSource: "booking_engine",
       bookingCode: bookingCode,
       createdAt: FieldValue.serverTimestamp(),

@@ -2,12 +2,38 @@
 import React, { useEffect, useState, Suspense } from "react";
 import { useSearchParams } from "next/navigation";
 import { createBooking, subscribeBookingsForOwnerAndDate } from "@/lib/bookings";
+import { auth, db } from "@/lib/firebase";
+import { signInWithCustomToken, onAuthStateChanged, signOut } from "firebase/auth";
+import { createCustomerDocument, incrementCustomerBookings } from "@/lib/customers";
 
 function BookPageContent() {
   const searchParams = useSearchParams();
   // Default ownerUid for this salon, can be overridden via URL params
   const DEFAULT_OWNER_UID = "0Z0k6PleLzLHXrYG8UdUKvp7DUt2";
   const ownerUid = searchParams.get("ownerUid") || DEFAULT_OWNER_UID;
+
+  // Authentication state
+  const [isAuthenticated, setIsAuthenticated] = useState<boolean>(false);
+  const [currentCustomer, setCurrentCustomer] = useState<any>(null);
+  const [showAuthModal, setShowAuthModal] = useState<boolean>(true);
+  const [authMode, setAuthMode] = useState<"login" | "register">("login");
+  const [authLoading, setAuthLoading] = useState<boolean>(false);
+  const [authError, setAuthError] = useState<string>("");
+  const [showLogoutConfirm, setShowLogoutConfirm] = useState<boolean>(false);
+  
+  // Auth form fields
+  const [authEmail, setAuthEmail] = useState<string>("");
+  const [authPassword, setAuthPassword] = useState<string>("");
+  const [authFullName, setAuthFullName] = useState<string>("");
+  const [authPhone, setAuthPhone] = useState<string>("");
+  const [showPassword, setShowPassword] = useState<boolean>(false);
+  
+  // Edit customer details
+  const [showEditModal, setShowEditModal] = useState<boolean>(false);
+  const [editFullName, setEditFullName] = useState<string>("");
+  const [editPhone, setEditPhone] = useState<string>("");
+  const [editLoading, setEditLoading] = useState<boolean>(false);
+  const [editError, setEditError] = useState<string>("");
 
   // Booking state
   const [bkBranchId, setBkBranchId] = useState<string | null>(null);
@@ -45,6 +71,229 @@ function BookPageContent() {
   const [bookings, setBookings] = useState<Array<{ id: string; staffId?: string; date: string; time: string; duration: number; status: string }>>([]);
   const [loading, setLoading] = useState<boolean>(true);
   const [error, setError] = useState<string | null>(null);
+
+  // Check authentication status
+  useEffect(() => {
+    const unsubscribe = onAuthStateChanged(auth, async (user) => {
+      if (user) {
+        setIsAuthenticated(true);
+        
+        // Fetch customer details from Firestore to get phone number
+        try {
+          const { doc, getDoc } = await import("firebase/firestore");
+          const customerRef = doc(db, "customers", user.uid);
+          const customerSnap = await getDoc(customerRef);
+          
+          if (customerSnap.exists()) {
+            const customerData = customerSnap.data();
+            console.log("Customer data loaded:", customerData);
+            setCurrentCustomer({
+              uid: user.uid,
+              email: customerData.email || user.email,
+              fullName: customerData.fullName || user.displayName,
+              phone: customerData.phone || "",
+            });
+            // Auto-fill phone number in booking form
+            setBkClientPhone(customerData.phone || "");
+          } else {
+            console.log("No customer document found, creating default customer object");
+            setCurrentCustomer({
+              uid: user.uid,
+              email: user.email,
+              fullName: user.displayName,
+              phone: "",
+            });
+          }
+        } catch (error: any) {
+          console.error("Error fetching customer data:", error);
+          console.error("Error code:", error.code);
+          console.error("Error message:", error.message);
+          
+          // Handle permission error gracefully
+          if (error.code === 'permission-denied') {
+            console.warn("⚠️ Firestore permission denied. Using auth data only.");
+            console.warn("Please update Firestore security rules to allow customers to read their own data.");
+          }
+          
+          // Fallback to auth data
+          setCurrentCustomer({
+            uid: user.uid,
+            email: user.email,
+            fullName: user.displayName,
+            phone: "",
+          });
+        }
+        
+        setShowAuthModal(false);
+      } else {
+        setIsAuthenticated(false);
+        setCurrentCustomer(null);
+        setShowAuthModal(true);
+      }
+    });
+
+    return () => unsubscribe();
+  }, []);
+
+  // Handle customer registration
+  const handleRegister = async () => {
+    setAuthError("");
+    
+    if (!authEmail || !authPassword || !authFullName || !authPhone) {
+      setAuthError("Please fill in all required fields");
+      return;
+    }
+
+    if (authPassword.length < 6) {
+      setAuthError("Password must be at least 6 characters");
+      return;
+    }
+
+    setAuthLoading(true);
+    try {
+      const response = await fetch("/api/auth/register", {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({
+          email: authEmail,
+          password: authPassword,
+          fullName: authFullName,
+          phone: authPhone,
+        }),
+      });
+
+      const data = await response.json();
+
+      if (!response.ok) {
+        throw new Error(data.error || "Registration failed");
+      }
+
+      // Now login with the created account
+      await handleLogin();
+    } catch (error: any) {
+      console.error("Registration error:", error);
+      setAuthError(error.message || "Failed to create account");
+    } finally {
+      setAuthLoading(false);
+    }
+  };
+
+  // Handle customer login
+  const handleLogin = async () => {
+    setAuthError("");
+    
+    if (!authEmail || !authPassword) {
+      setAuthError("Please enter email and password");
+      return;
+    }
+
+    setAuthLoading(true);
+    try {
+      // First, try to sign in with email/password using Firebase client
+      const { signInWithEmailAndPassword } = await import("firebase/auth");
+      const userCredential = await signInWithEmailAndPassword(auth, authEmail, authPassword);
+      
+      // User is now signed in
+      setIsAuthenticated(true);
+      setCurrentCustomer({
+        uid: userCredential.user.uid,
+        email: userCredential.user.email,
+        fullName: userCredential.user.displayName,
+      });
+      setShowAuthModal(false);
+      
+      // Clear form
+      setAuthEmail("");
+      setAuthPassword("");
+      setAuthFullName("");
+      setAuthPhone("");
+    } catch (error: any) {
+      console.error("Login error:", error);
+      if (error.code === "auth/user-not-found" || error.code === "auth/wrong-password") {
+        setAuthError("Invalid email or password");
+      } else if (error.code === "auth/invalid-email") {
+        setAuthError("Invalid email format");
+      } else if (error.code === "auth/too-many-requests") {
+        setAuthError("Too many failed attempts. Please try again later.");
+      } else {
+        setAuthError(error.message || "Failed to login");
+      }
+    } finally {
+      setAuthLoading(false);
+    }
+  };
+
+  // Handle logout confirmation
+  const handleLogoutClick = () => {
+    setShowLogoutConfirm(true);
+  };
+
+  const confirmLogout = async () => {
+    try {
+      await signOut(auth);
+      setIsAuthenticated(false);
+      setCurrentCustomer(null);
+      setShowAuthModal(true);
+      setShowLogoutConfirm(false);
+      resetBooking();
+    } catch (error) {
+      console.error("Logout error:", error);
+    }
+  };
+
+  const cancelLogout = () => {
+    setShowLogoutConfirm(false);
+  };
+
+  // Handle edit customer details
+  const handleEditClick = () => {
+    setEditFullName(currentCustomer?.fullName || "");
+    setEditPhone(currentCustomer?.phone || bkClientPhone || "");
+    setEditError("");
+    setShowEditModal(true);
+  };
+
+  const handleSaveEdit = async () => {
+    setEditError("");
+    
+    if (!editFullName.trim()) {
+      setEditError("Full name is required");
+      return;
+    }
+
+    setEditLoading(true);
+    try {
+      // Update customer in Firestore
+      const { updateDoc, doc } = await import("firebase/firestore");
+      const customerRef = doc(db, "customers", currentCustomer.uid);
+      
+      await updateDoc(customerRef, {
+        fullName: editFullName.trim(),
+        phone: editPhone.trim(),
+        updatedAt: new Date().toISOString(),
+      });
+
+      // Update local state
+      setCurrentCustomer({
+        ...currentCustomer,
+        fullName: editFullName.trim(),
+        phone: editPhone.trim(),
+      });
+      setBkClientPhone(editPhone.trim());
+      
+      setShowEditModal(false);
+    } catch (error: any) {
+      console.error("Error updating customer:", error);
+      setEditError("Failed to update details. Please try again.");
+    } finally {
+      setEditLoading(false);
+    }
+  };
+
+  const handleCancelEdit = () => {
+    setShowEditModal(false);
+    setEditError("");
+  };
 
   // Fetch data from API routes
   useEffect(() => {
@@ -291,7 +540,7 @@ function BookPageContent() {
   };
   
   const handleConfirmBooking = async () => {
-    if (!bkServiceId || !bkBranchId || !bkDate || !bkTime || !ownerUid) return;
+    if (!bkServiceId || !bkBranchId || !bkDate || !bkTime || !ownerUid || !currentCustomer) return;
     setSubmittingBooking(true);
     
     const service = servicesList.find((s) => String(s.id) === String(bkServiceId));
@@ -303,7 +552,7 @@ function BookPageContent() {
     const serviceName = service?.name || "";
     const branchName = branches.find((b: any) => String(b.id) === String(bkBranchId))?.name || "";
     const staffName = bkStaffId ? staffList.find((s: any) => String(s.id) === String(bkStaffId))?.name || "" : "Any Available";
-    const client = bkClientName?.trim() || "Guest";
+    const client = currentCustomer.fullName || bkClientName?.trim() || "Customer";
     const bookingDate = formatLocalYmd(bkDate);
     const bookingPrice = service?.price || 0;
     const bookingDuration = service?.duration || 60;
@@ -312,7 +561,7 @@ function BookPageContent() {
       const result = await createBooking({
         ownerUid,
         client,
-        clientEmail: bkClientEmail?.trim() || undefined,
+        clientEmail: currentCustomer.email || bkClientEmail?.trim() || undefined,
         clientPhone: bkClientPhone?.trim() || undefined,
         notes: bkNotes?.trim() || undefined,
         serviceId: bkServiceId,
@@ -326,7 +575,11 @@ function BookPageContent() {
         duration: bookingDuration,
         status: "Pending",
         price: bookingPrice,
+        customerUid: currentCustomer.uid, // Link booking to customer
       });
+      
+      // Increment customer's booking count
+      await incrementCustomerBookings(currentCustomer.uid);
       
       // Store booking summary for success popup
       setBookingSummary({
@@ -360,6 +613,250 @@ function BookPageContent() {
             <p className="text-slate-600">Please provide a valid salon ID in the URL.</p>
           </div>
         </div>
+      </div>
+    );
+  }
+
+  // Authentication Modal - Creative Design
+  if (showAuthModal && !isAuthenticated) {
+    return (
+      <div className="min-h-screen flex items-center justify-center p-4 bg-gradient-to-br from-pink-50 via-purple-50 to-indigo-50 relative overflow-hidden">
+        {/* Animated Background Shapes */}
+        <div className="absolute inset-0 overflow-hidden">
+          <div className="absolute top-20 left-10 w-72 h-72 bg-pink-200 rounded-full mix-blend-multiply filter blur-3xl opacity-70 animate-blob"></div>
+          <div className="absolute top-40 right-10 w-72 h-72 bg-purple-200 rounded-full mix-blend-multiply filter blur-3xl opacity-70 animate-blob animation-delay-2000"></div>
+          <div className="absolute bottom-20 left-1/2 w-72 h-72 bg-indigo-200 rounded-full mix-blend-multiply filter blur-3xl opacity-70 animate-blob animation-delay-4000"></div>
+        </div>
+
+        {/* Auth Card */}
+        <div className="w-full max-w-md relative z-10">
+          <div className="bg-white/90 backdrop-blur-lg rounded-2xl shadow-2xl border-2 border-white p-6 sm:p-7">
+            
+            {/* Decorative Elements */}
+            <div className="absolute -top-2 -right-2 w-16 h-16 bg-gradient-to-br from-pink-400 to-purple-400 rounded-full blur-2xl opacity-60"></div>
+            <div className="absolute -bottom-2 -left-2 w-16 h-16 bg-gradient-to-br from-indigo-400 to-pink-400 rounded-full blur-2xl opacity-60"></div>
+            
+            {/* Toggle Switch for Login/Register */}
+            <div className="relative flex bg-gradient-to-r from-slate-100 to-slate-50 rounded-full p-1.5 mb-5 shadow-inner">
+              {/* Sliding Background */}
+              <div 
+                className={`absolute top-1.5 h-[calc(100%-12px)] w-[calc(50%-6px)] bg-gradient-to-r from-slate-900 to-slate-800 rounded-full shadow-lg transition-all duration-500 ease-out ${
+                  authMode === "register" ? "translate-x-[calc(100%+6px)]" : "translate-x-0"
+                }`}
+              />
+              
+              <button
+                onClick={() => {
+                  setAuthMode("login");
+                  setAuthError("");
+                }}
+                disabled={authLoading}
+                className={`flex-1 py-3 rounded-full font-bold text-sm relative z-10 transition-all duration-500 ease-out ${
+                  authMode === "login"
+                    ? "text-white scale-105"
+                    : "text-slate-600 hover:text-slate-900 scale-100"
+                }`}
+              >
+                <i className="fas fa-sign-in-alt mr-2" />
+                Login
+              </button>
+              <button
+                onClick={() => {
+                  setAuthMode("register");
+                  setAuthError("");
+                }}
+                disabled={authLoading}
+                className={`flex-1 py-3 rounded-full font-bold text-sm relative z-10 transition-all duration-500 ease-out ${
+                  authMode === "register"
+                    ? "text-white scale-105"
+                    : "text-slate-600 hover:text-slate-900 scale-100"
+                }`}
+              >
+                <i className="fas fa-user-plus mr-2" />
+                Register
+              </button>
+            </div>
+            
+            {/* Title */}
+            <div className="text-center mb-5">
+              <h2 className="text-2xl font-black text-slate-900 mb-1.5 bg-gradient-to-r from-pink-600 via-purple-600 to-indigo-600 bg-clip-text text-transparent">
+                {authMode === "login" ? "Welcome Back!" : "Join Us Today!"}
+              </h2>
+              <p className="text-slate-600 text-xs">
+                {authMode === "login" 
+                  ? "Sign in to book your next appointment" 
+                  : "Create your account in seconds"}
+              </p>
+            </div>
+
+            {/* Error Message */}
+            {authError && (
+              <div className="mb-4 p-3 bg-gradient-to-r from-red-50 to-pink-50 border-l-4 border-red-500 rounded-lg shadow-sm animate-shake">
+                <p className="text-red-700 text-xs font-medium flex items-center gap-2">
+                  <i className="fas fa-exclamation-triangle" />
+                  {authError}
+                </p>
+              </div>
+            )}
+
+            {/* Form */}
+            <div className="space-y-3.5">
+              {authMode === "register" && (
+                <>
+                  {/* Full Name with Icon */}
+                  <div className="group">
+                    <label className="block text-xs font-bold text-slate-800 mb-1.5 flex items-center gap-1.5">
+                      <i className="fas fa-user text-pink-500 text-xs"></i>
+                      Full Name <span className="text-pink-500">*</span>
+                    </label>
+                    <div className="relative">
+                      <input
+                        type="text"
+                        value={authFullName}
+                        onChange={(e) => setAuthFullName(e.target.value)}
+                        className="w-full bg-slate-50 border-2 border-slate-200 rounded-lg px-3 py-2 pl-9 text-sm focus:outline-none focus:border-pink-400 focus:bg-white focus:shadow-md focus:shadow-pink-100 transition-all duration-300"
+                        placeholder="John Doe"
+                        disabled={authLoading}
+                      />
+                      <i className="fas fa-user absolute left-3 top-1/2 -translate-y-1/2 text-slate-400 text-xs group-focus-within:text-pink-500 transition-colors"></i>
+                    </div>
+                  </div>
+
+                  {/* Phone with Icon */}
+                  <div className="group">
+                    <label className="block text-xs font-bold text-slate-800 mb-1.5 flex items-center gap-1.5">
+                      <i className="fas fa-phone text-purple-500 text-xs"></i>
+                      Phone Number <span className="text-pink-500">*</span>
+                    </label>
+                    <div className="relative">
+                      <input
+                        type="tel"
+                        value={authPhone}
+                        onChange={(e) => setAuthPhone(e.target.value)}
+                        className="w-full bg-slate-50 border-2 border-slate-200 rounded-lg px-3 py-2 pl-9 text-sm focus:outline-none focus:border-purple-400 focus:bg-white focus:shadow-md focus:shadow-purple-100 transition-all duration-300"
+                        placeholder="+1 555 000 1111"
+                        disabled={authLoading}
+                      />
+                      <i className="fas fa-phone absolute left-3 top-1/2 -translate-y-1/2 text-slate-400 text-xs group-focus-within:text-purple-500 transition-colors"></i>
+                    </div>
+                  </div>
+                </>
+              )}
+
+              {/* Email with Icon */}
+              <div className="group">
+                <label className="block text-xs font-bold text-slate-800 mb-1.5 flex items-center gap-1.5">
+                  <i className="fas fa-envelope text-indigo-500 text-xs"></i>
+                  Email Address <span className="text-pink-500">*</span>
+                </label>
+                <div className="relative">
+                  <input
+                    type="email"
+                    value={authEmail}
+                    onChange={(e) => setAuthEmail(e.target.value)}
+                    className="w-full bg-slate-50 border-2 border-slate-200 rounded-lg px-3 py-2 pl-9 text-sm focus:outline-none focus:border-indigo-400 focus:bg-white focus:shadow-md focus:shadow-indigo-100 transition-all duration-300"
+                    placeholder="you@example.com"
+                    disabled={authLoading}
+                  />
+                  <i className="fas fa-envelope absolute left-3 top-1/2 -translate-y-1/2 text-slate-400 text-xs group-focus-within:text-indigo-500 transition-colors"></i>
+                </div>
+              </div>
+
+              {/* Password with Icon and Eye */}
+              <div className="group">
+                <label className="block text-xs font-bold text-slate-800 mb-1.5 flex items-center gap-1.5">
+                  <i className="fas fa-lock text-pink-500 text-xs"></i>
+                  Password <span className="text-pink-500">*</span>
+                </label>
+                <div className="relative">
+                  <input
+                    type={showPassword ? "text" : "password"}
+                    value={authPassword}
+                    onChange={(e) => setAuthPassword(e.target.value)}
+                    className="w-full bg-slate-50 border-2 border-slate-200 rounded-lg px-3 py-2 pl-9 pr-9 text-sm focus:outline-none focus:border-pink-400 focus:bg-white focus:shadow-md focus:shadow-pink-100 transition-all duration-300"
+                    placeholder="••••••••"
+                    disabled={authLoading}
+                  />
+                  <i className="fas fa-lock absolute left-3 top-1/2 -translate-y-1/2 text-slate-400 text-xs group-focus-within:text-pink-500 transition-colors"></i>
+                  <button
+                    type="button"
+                    onClick={() => setShowPassword(!showPassword)}
+                    className="absolute right-3 top-1/2 -translate-y-1/2 text-slate-400 hover:text-pink-500 transition-colors text-sm"
+                    tabIndex={-1}
+                  >
+                    <i className={`fas ${showPassword ? "fa-eye-slash" : "fa-eye"}`} />
+                  </button>
+                </div>
+                {authMode === "register" && (
+                  <p className="text-[10px] text-slate-500 mt-1 flex items-center gap-1">
+                    <i className="fas fa-info-circle text-pink-400 text-[10px]"></i>
+                    Minimum 6 characters required
+                  </p>
+                )}
+              </div>
+
+              {/* Submit Button - Black */}
+              <button
+                onClick={authMode === "login" ? handleLogin : handleRegister}
+                disabled={authLoading}
+                className={`w-full mt-4 py-3 rounded-lg font-bold text-sm text-white transition-all transform ${
+                  authLoading
+                    ? "bg-slate-400 cursor-not-allowed"
+                    : "bg-black hover:bg-slate-900 hover:scale-[1.02] active:scale-[0.98] shadow-lg hover:shadow-xl"
+                }`}
+              >
+                <span className="flex items-center justify-center gap-2 uppercase tracking-wider">
+                  {authLoading ? (
+                    <>
+                      <i className="fas fa-spinner animate-spin" />
+                      {authMode === "login" ? "Signing in..." : "Creating account..."}
+                    </>
+                  ) : (
+                    <>
+                      <i className={`fas ${authMode === "login" ? "fa-sign-in-alt" : "fa-user-plus"}`} />
+                      {authMode === "login" ? "Sign In Now" : "Create Account"}
+                    </>
+                  )}
+                </span>
+              </button>
+            </div>
+          </div>
+        </div>
+
+        {/* Custom CSS for animations */}
+        <style jsx>{`
+          @keyframes blob {
+            0%, 100% { transform: translate(0, 0) scale(1); }
+            25% { transform: translate(20px, -30px) scale(1.1); }
+            50% { transform: translate(-20px, 20px) scale(0.9); }
+            75% { transform: translate(30px, 10px) scale(1.05); }
+          }
+          .animate-blob {
+            animation: blob 7s infinite;
+          }
+          .animation-delay-2000 {
+            animation-delay: 2s;
+          }
+          .animation-delay-4000 {
+            animation-delay: 4s;
+          }
+          @keyframes shake {
+            0%, 100% { transform: translateX(0); }
+            25% { transform: translateX(-5px); }
+            75% { transform: translateX(5px); }
+          }
+          .animate-shake {
+            animation: shake 0.3s ease-in-out;
+          }
+          @keyframes shake {
+            0%, 100% { transform: translateX(0); }
+            25% { transform: translateX(-5px); }
+            75% { transform: translateX(5px); }
+          }
+          .animate-shake {
+            animation: shake 0.3s ease-in-out;
+          }
+        `}</style>
       </div>
     );
   }
@@ -485,6 +982,63 @@ function BookPageContent() {
     <div className="min-h-screen bg-gradient-to-br from-pink-50 via-purple-50 to-indigo-50">
       {/* Creative Header with Salon Name */}
       <div className="relative overflow-hidden bg-indigo-900">
+        {/* Logout Button - Top Right */}
+        <div className="absolute top-8 right-6 z-50">
+          <button
+            onClick={handleLogoutClick}
+            className="px-4 py-2 bg-white/10 backdrop-blur-sm border border-white/20 hover:bg-white/20 text-white font-semibold rounded-lg transition-all hover:scale-105 active:scale-95 flex items-center gap-2"
+          >
+            <i className="fas fa-sign-out-alt"></i>
+            <span className="hidden sm:inline">Logout</span>
+          </button>
+        </div>
+
+        {/* Logout Confirmation Modal */}
+        {showLogoutConfirm && (
+          <div className="fixed inset-0 bg-black/50 backdrop-blur-sm flex items-center justify-center z-[100] p-4">
+            <div className="bg-white rounded-2xl shadow-2xl max-w-md w-full p-6 sm:p-8 animate-scale-in">
+              <div className="text-center mb-6">
+                <div className="inline-flex items-center justify-center w-16 h-16 bg-red-100 rounded-full mb-4">
+                  <i className="fas fa-sign-out-alt text-2xl text-red-600"></i>
+                </div>
+                <h3 className="text-xl sm:text-2xl font-bold text-slate-900 mb-2">Logout Confirmation</h3>
+                <p className="text-slate-600 text-sm">Are you sure you want to logout? Your current booking progress will be lost.</p>
+              </div>
+              
+              <div className="flex flex-col sm:flex-row gap-3">
+                <button
+                  onClick={cancelLogout}
+                  className="flex-1 px-4 py-3 border-2 border-slate-300 text-slate-700 font-semibold rounded-lg hover:bg-slate-50 transition-all"
+                >
+                  Cancel
+                </button>
+                <button
+                  onClick={confirmLogout}
+                  className="flex-1 px-4 py-3 bg-red-600 text-white font-semibold rounded-lg hover:bg-red-700 transition-all"
+                >
+                  Yes, Logout
+                </button>
+              </div>
+            </div>
+          </div>
+        )}
+
+        <style jsx>{`
+          @keyframes scale-in {
+            from {
+              opacity: 0;
+              transform: scale(0.9);
+            }
+            to {
+              opacity: 1;
+              transform: scale(1);
+            }
+          }
+          .animate-scale-in {
+            animation: scale-in 0.2s ease-out;
+          }
+        `}</style>
+
         {/* Creative Pattern Background */}
         <div className="absolute inset-0 opacity-10">
           <div className="absolute inset-0" style={{
@@ -883,45 +1437,139 @@ function BookPageContent() {
                     <span className="uppercase tracking-wide text-sm sm:text-base">Your Details</span>
                   </div>
                   <div className="space-y-3 sm:space-y-4">
+                    {/* Logged in customer info - read only */}
+                    <div className="bg-green-50 border-2 border-green-200 p-4 rounded-lg">
+                      <div className="flex items-center justify-between mb-2">
+                        <div className="flex items-center gap-2">
+                          <i className="fas fa-check-circle text-green-600"></i>
+                          <span className="text-sm font-semibold text-green-800">Signed in as:</span>
+                        </div>
+                        <button
+                          onClick={handleEditClick}
+                          className="text-xs px-3 py-1 bg-white border border-green-300 text-green-700 font-semibold rounded hover:bg-green-100 transition-all"
+                        >
+                          <i className="fas fa-edit mr-1"></i>
+                          Edit
+                        </button>
+                      </div>
+                      <div className="space-y-1 text-sm text-slate-700">
+                        <div className="flex items-center gap-2">
+                          <i className="fas fa-user text-pink-500 w-4"></i>
+                          <span className="font-semibold">{currentCustomer?.fullName || "Customer"}</span>
+                        </div>
+                        <div className="flex items-center gap-2">
+                          <i className="fas fa-envelope text-pink-500 w-4"></i>
+                          <span>{currentCustomer?.email}</span>
+                        </div>
+                        {currentCustomer?.phone && (
+                          <div className="flex items-center gap-2">
+                            <i className="fas fa-phone text-pink-500 w-4"></i>
+                            <span>{currentCustomer.phone}</span>
+                          </div>
+                        )}
+                      </div>
+                    </div>
+
+                    {/* Edit Customer Modal */}
+                    {showEditModal && (
+                      <div className="fixed inset-0 bg-black/50 backdrop-blur-sm flex items-center justify-center z-[100] p-4">
+                        <div className="bg-white rounded-2xl shadow-2xl max-w-md w-full p-6 sm:p-8 animate-scale-in">
+                          <div className="mb-6">
+                            <div className="flex items-center gap-3 mb-2">
+                              <div className="w-10 h-10 bg-indigo-100 rounded-full flex items-center justify-center">
+                                <i className="fas fa-user-edit text-indigo-600"></i>
+                              </div>
+                              <h3 className="text-xl font-bold text-slate-900">Edit Your Details</h3>
+                            </div>
+                            <p className="text-sm text-slate-600">Update your personal information</p>
+                          </div>
+
+                          {editError && (
+                            <div className="mb-4 p-3 bg-red-50 border-l-4 border-red-500 rounded">
+                              <p className="text-red-700 text-xs font-medium flex items-center gap-2">
+                                <i className="fas fa-exclamation-circle" />
+                                {editError}
+                              </p>
+                            </div>
+                          )}
+
+                          <div className="space-y-4 mb-6">
+                            <div>
+                              <label className="block text-sm font-semibold text-slate-700 mb-2">
+                                Full Name <span className="text-red-500">*</span>
+                              </label>
+                              <input
+                                type="text"
+                                value={editFullName}
+                                onChange={(e) => setEditFullName(e.target.value)}
+                                className="w-full border-2 border-slate-300 rounded-lg px-4 py-2.5 text-sm focus:outline-none focus:border-indigo-500 focus:ring-2 focus:ring-indigo-200"
+                                placeholder="Enter your full name"
+                                disabled={editLoading}
+                              />
+                            </div>
+
+                            <div>
+                              <label className="block text-sm font-semibold text-slate-700 mb-2">
+                                Phone Number
+                              </label>
+                              <input
+                                type="tel"
+                                value={editPhone}
+                                onChange={(e) => setEditPhone(e.target.value)}
+                                className="w-full border-2 border-slate-300 rounded-lg px-4 py-2.5 text-sm focus:outline-none focus:border-indigo-500 focus:ring-2 focus:ring-indigo-200"
+                                placeholder="+1 555 000 1111"
+                                disabled={editLoading}
+                              />
+                            </div>
+
+                            <div className="bg-slate-50 border border-slate-200 rounded-lg p-3">
+                              <label className="block text-xs font-semibold text-slate-600 mb-1">Email (Cannot be changed)</label>
+                              <div className="text-sm text-slate-500">{currentCustomer?.email}</div>
+                            </div>
+                          </div>
+
+                          <div className="flex flex-col sm:flex-row gap-3">
+                            <button
+                              onClick={handleCancelEdit}
+                              disabled={editLoading}
+                              className="flex-1 px-4 py-3 border-2 border-slate-300 text-slate-700 font-semibold rounded-lg hover:bg-slate-50 transition-all disabled:opacity-50"
+                            >
+                              Cancel
+                            </button>
+                            <button
+                              onClick={handleSaveEdit}
+                              disabled={editLoading}
+                              className="flex-1 px-4 py-3 bg-indigo-600 text-white font-semibold rounded-lg hover:bg-indigo-700 transition-all disabled:opacity-50 disabled:cursor-not-allowed"
+                            >
+                              {editLoading ? (
+                                <span className="flex items-center justify-center gap-2">
+                                  <i className="fas fa-spinner animate-spin" />
+                                  Saving...
+                                </span>
+                              ) : (
+                                <span>Save Changes</span>
+                              )}
+                            </button>
+                          </div>
+                        </div>
+                      </div>
+                    )}
+
                     <div>
                         <label className="block text-sm font-semibold text-slate-700 mb-2 flex items-center gap-2">
-                          <i className="fas fa-user text-pink-500"></i>
-                          Full Name <span className="text-pink-600">*</span>
-                        </label>
-                        <input
-                          type="text"
-                          value={bkClientName}
-                          onChange={(e) => setBkClientName(e.target.value)}
-                          className="w-full border-2 border-slate-300 px-4 py-3 text-sm focus:outline-none focus:border-pink-500 focus:ring-2 focus:ring-pink-200 transition-all"
-                          placeholder="Enter your full name"
-                          required
-                        />
-                      </div>
-                      <div>
-                        <label className="block text-sm font-semibold text-slate-700 mb-2 flex items-center gap-2">
-                          <i className="fas fa-envelope text-pink-500"></i>
-                          Email Address
-                        </label>
-                        <input
-                          type="email"
-                          value={bkClientEmail}
-                          onChange={(e) => setBkClientEmail(e.target.value)}
-                          className="w-full border-2 border-slate-300 px-4 py-3 text-sm focus:outline-none focus:border-pink-500 focus:ring-2 focus:ring-pink-200 transition-all"
-                          placeholder="your.email@example.com"
-                        />
-                      </div>
-                      <div>
-                        <label className="block text-sm font-semibold text-slate-700 mb-2 flex items-center gap-2">
                           <i className="fas fa-phone text-pink-500"></i>
-                          Phone Number
+                          Phone Number <span className="text-slate-500 font-normal text-xs">(Editable for this booking)</span>
                         </label>
                         <input
                           type="tel"
                           value={bkClientPhone}
                           onChange={(e) => setBkClientPhone(e.target.value)}
-                          className="w-full border-2 border-slate-300 px-4 py-3 text-sm focus:outline-none focus:border-pink-500 focus:ring-2 focus:ring-pink-200 transition-all"
+                          className="w-full border-2 border-slate-300 px-4 py-3 text-sm focus:outline-none focus:border-pink-500 focus:ring-2 focus:ring-pink-200 transition-all bg-white"
                           placeholder="+1 555 000 1111"
                         />
+                        <p className="text-xs text-slate-500 mt-1.5">
+                          <i className="fas fa-info-circle text-pink-400"></i> You can change this for this booking only. To update your saved number, use the Edit button above.
+                        </p>
                       </div>
                       <div>
                         <label className="block text-sm font-semibold text-slate-700 mb-2 flex items-center gap-2">
@@ -979,16 +1627,16 @@ function BookPageContent() {
 
                 {/* Submit Button */}
                 <button
-                    disabled={!bkBranchId || !bkServiceId || !bkDate || !bkTime || submittingBooking || !bkClientName.trim()}
+                    disabled={!bkBranchId || !bkServiceId || !bkDate || !bkTime || submittingBooking || !currentCustomer}
                     onClick={handleConfirmBooking}
                   className={`w-full px-4 sm:px-6 py-3 sm:py-4 md:py-5 text-white font-bold text-base sm:text-lg md:text-xl transition-all border-2 sm:border-4 relative overflow-hidden ${
-                    bkBranchId && bkServiceId && bkDate && bkTime && !submittingBooking && bkClientName.trim() 
+                    bkBranchId && bkServiceId && bkDate && bkTime && !submittingBooking && currentCustomer 
                       ? "bg-indigo-900 border-indigo-700 hover:bg-indigo-800 hover:border-indigo-600 active:scale-[0.98]" 
                       : "bg-slate-300 border-slate-400 cursor-not-allowed"
                   }`}
                 >
                   {/* Diagonal stripe pattern */}
-                  <div className={`absolute inset-0 opacity-10 ${bkBranchId && bkServiceId && bkDate && bkTime && !submittingBooking && bkClientName.trim() ? "" : "hidden"}`} style={{
+                  <div className={`absolute inset-0 opacity-10 ${bkBranchId && bkServiceId && bkDate && bkTime && !submittingBooking && currentCustomer ? "" : "hidden"}`} style={{
                     backgroundImage: `repeating-linear-gradient(45deg, transparent, transparent 10px, currentColor 10px, currentColor 11px)`,
                   }}></div>
                   
