@@ -562,7 +562,15 @@ function BookPageContent() {
   };
   
   const handleConfirmBooking = async () => {
-    if (bkSelectedServices.length === 0 || !bkBranchId || !bkDate || !bkTime || !ownerUid || !currentCustomer) return;
+    // Check if all required fields are filled
+    if (bkSelectedServices.length === 0 || !bkBranchId || !bkDate || !ownerUid || !currentCustomer) return;
+    
+    // Ensure all services have times selected
+    if (Object.keys(bkServiceTimes).length !== bkSelectedServices.length) {
+      alert("Please select a time for each service.");
+      return;
+    }
+    
     setSubmittingBooking(true);
     
     // Get all selected services
@@ -581,6 +589,10 @@ function BookPageContent() {
     const totalDuration = selectedServiceObjects.reduce((sum: number, s: any) => sum + (Number(s?.duration) || 0), 0);
     const serviceNames = selectedServiceObjects.map((s: any) => s?.name || "").join(", ");
     const serviceIds = selectedServiceObjects.map((s: any) => s?.id).join(",");
+    
+    // Use the first service's time as the main booking time
+    const firstServiceId = bkSelectedServices[0];
+    const mainBookingTime = bkServiceTimes[String(firstServiceId)] || "";
     
     const branchName = branches.find((b: any) => String(b.id) === String(bkBranchId))?.name || "";
     const staffName = bkStaffId ? staffList.find((s: any) => String(s.id) === String(bkStaffId))?.name || "" : "Any Available";
@@ -603,7 +615,7 @@ function BookPageContent() {
         branchId: bkBranchId,
         branchName,
         date: bookingDate,
-        time: bkTime,
+        time: mainBookingTime,
         duration: bookingDuration,
         status: "Pending",
         price: bookingPrice,
@@ -612,7 +624,8 @@ function BookPageContent() {
           id: s?.id || "",
           name: s?.name || "",
           price: Number(s?.price) || 0,
-          duration: Number(s?.duration) || 0
+          duration: Number(s?.duration) || 0,
+          time: bkServiceTimes[String(s?.id)] || ""
         })),
       });
       
@@ -627,13 +640,14 @@ function BookPageContent() {
         branchName,
         staffName: staffName || "Any Available",
         date: bookingDate,
-        time: bkTime || "",
+        time: mainBookingTime || "",
         price: bookingPrice,
         duration: bookingDuration,
         services: selectedServiceObjects.map((s: any) => ({ 
           name: s?.name || "",
           price: Number(s?.price) || 0,
-          duration: Number(s?.duration) || 0
+          duration: Number(s?.duration) || 0,
+          time: bkServiceTimes[String(s?.id)] || ""
         })),
       });
       
