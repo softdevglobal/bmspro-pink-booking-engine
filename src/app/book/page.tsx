@@ -84,6 +84,34 @@ function BookPageContent() {
   useEffect(() => {
     const unsubscribe = onAuthStateChanged(auth, async (user) => {
       if (user) {
+        // Check if user is an admin - admins should not access booking engine
+        try {
+          const { doc, getDoc } = await import("firebase/firestore");
+          
+          // First check if user has an admin role in users collection
+          const userRef = doc(db, "users", user.uid);
+          const userSnap = await getDoc(userRef);
+          
+          if (userSnap.exists()) {
+            const userData = userSnap.data();
+            const userRole = (userData?.role || "").toString().toLowerCase();
+            
+            // Block admin users from accessing booking engine
+            const adminRoles = ["salon_owner", "salon_branch_admin", "super_admin"];
+            if (adminRoles.includes(userRole)) {
+              await signOut(auth);
+              setAuthError("This is the customer booking portal. Please use the admin panel to manage bookings.");
+              setIsAuthenticated(false);
+              setCurrentCustomer(null);
+              setShowAuthModal(true);
+              return;
+            }
+          }
+        } catch (error) {
+          // If error checking users collection, continue - user might be a customer
+          console.log("User not in admin users collection, proceeding as customer");
+        }
+        
         setIsAuthenticated(true);
         
         // Fetch customer details from Firestore to get phone number
