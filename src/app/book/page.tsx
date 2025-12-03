@@ -1317,99 +1317,192 @@ function BookPageContent() {
                 Confirm Your Booking
               </h3>
 
-                {/* Booking Summary */}
-              <div className="bg-gradient-to-br from-pink-50 to-purple-50 rounded-lg sm:rounded-xl p-4 sm:p-6 space-y-3 sm:space-y-4">
-                <div className="flex items-center justify-between text-sm sm:text-base">
-                  <span className="text-gray-600 font-medium">Location:</span>
-                  <span className="font-semibold text-gray-800 text-right">
-                    {branches.find((b) => b.id === bkBranchId)?.name}
-                  </span>
-                        </div>
+              {/* Two Column Layout: Customer Details (Left) & Booking Summary (Right) */}
+              <div className="grid grid-cols-1 lg:grid-cols-2 gap-4 sm:gap-6">
                 
-                {/* Multiple Services with Times */}
-                <div className="border-t border-purple-200 pt-3 sm:pt-4">
-                  <span className="text-gray-600 font-medium block mb-2 sm:mb-3 text-sm sm:text-base">Services ({bkSelectedServices.length}):</span>
-                  <div className="space-y-2">
-                    {bkSelectedServices.map((serviceId) => {
-                      const service = servicesList.find((s) => String(s.id) === String(serviceId));
-                              const time = bkServiceTimes[String(serviceId)];
-                              return (
-                        <div key={String(serviceId)} className="bg-white rounded-lg p-2.5 sm:p-3 border border-purple-200">
-                          <div className="flex justify-between items-center gap-2">
-                            <div className="min-w-0 flex-1">
-                              <div className="font-semibold text-gray-800 text-sm sm:text-base truncate">{service?.name}</div>
-                              <div className="text-[10px] sm:text-xs text-purple-600 mt-1">
-                                <i className="fas fa-clock mr-1"></i>
-                                {time} • {service?.duration} min
-                          </div>
-                      </div>
-                            <div className="font-bold text-pink-600 text-sm sm:text-base flex-shrink-0">${service?.price}</div>
+                {/* LEFT: Customer Details */}
+                <div className="bg-gray-50 rounded-lg sm:rounded-xl p-4 sm:p-6 border-2 border-gray-200">
+                  <div className="flex items-center gap-2 mb-4">
+                    <i className="fas fa-user-circle text-pink-600 text-xl"></i>
+                    <h4 className="text-lg sm:text-xl font-bold text-gray-800">Customer Details</h4>
+                  </div>
+                  
+                  <div className="space-y-4">
+                    {/* Full Name */}
+                    <div>
+                      <label className="block text-sm font-semibold text-gray-700 mb-2">
+                        <i className="fas fa-user text-gray-500 mr-2"></i>
+                        Full Name
+                      </label>
+                      <input
+                        type="text"
+                        value={currentCustomer?.fullName || ""}
+                        onChange={(e) => setCurrentCustomer({ ...currentCustomer, fullName: e.target.value })}
+                        placeholder="Enter your full name"
+                        className="w-full px-4 py-3 bg-white border-2 border-gray-300 rounded-lg focus:ring-2 focus:ring-pink-500 focus:border-transparent text-sm sm:text-base"
+                      />
                     </div>
+
+                    {/* Email */}
+                    <div>
+                      <label className="block text-sm font-semibold text-gray-700 mb-2">
+                        <i className="fas fa-envelope text-gray-500 mr-2"></i>
+                        Email Address
+                      </label>
+                      <input
+                        type="email"
+                        value={currentCustomer?.email || ""}
+                        onChange={(e) => setCurrentCustomer({ ...currentCustomer, email: e.target.value })}
+                        placeholder="Enter your email"
+                        className="w-full px-4 py-3 bg-white border-2 border-gray-300 rounded-lg focus:ring-2 focus:ring-pink-500 focus:border-transparent text-sm sm:text-base"
+                      />
+                    </div>
+
+                    {/* Phone */}
+                    <div>
+                      <label className="block text-sm font-semibold text-gray-700 mb-2">
+                        <i className="fas fa-phone text-gray-500 mr-2"></i>
+                        Phone Number
+                      </label>
+                      <input
+                        type="tel"
+                        value={currentCustomer?.phone || ""}
+                        onChange={(e) => setCurrentCustomer({ ...currentCustomer, phone: e.target.value })}
+                        placeholder="Enter your phone number"
+                        className="w-full px-4 py-3 bg-white border-2 border-gray-300 rounded-lg focus:ring-2 focus:ring-pink-500 focus:border-transparent text-sm sm:text-base"
+                      />
+                    </div>
+
+                    {/* Notes */}
+                    <div>
+                      <label className="block text-sm font-semibold text-gray-700 mb-2">
+                        <i className="fas fa-sticky-note text-gray-500 mr-2"></i>
+                        Additional Notes (Optional)
+                      </label>
+                      <textarea
+                        value={bkNotes}
+                        onChange={(e) => setBkNotes(e.target.value)}
+                        placeholder="Any special requests or notes..."
+                        rows={3}
+                        className="w-full px-4 py-3 bg-white border-2 border-gray-300 rounded-lg focus:ring-2 focus:ring-pink-500 focus:border-transparent text-sm sm:text-base resize-none"
+                      ></textarea>
+                    </div>
+                  </div>
+                </div>
+
+                {/* RIGHT: Booking Summary */}
+                <div className="bg-gray-50 rounded-lg sm:rounded-xl p-4 sm:p-6 border-2 border-gray-200">
+                  <div className="flex items-center gap-2 mb-4">
+                    <i className="fas fa-clipboard-list text-pink-600 text-xl"></i>
+                    <h4 className="text-lg sm:text-xl font-bold text-gray-800">Booking Summary</h4>
+                  </div>
+
+                  <div className="space-y-3 sm:space-y-4">
+                    {/* Location */}
+                    <div className="flex items-center justify-between text-sm sm:text-base pb-3 border-b border-gray-200">
+                      <span className="text-gray-600 font-medium flex items-center gap-2">
+                        <i className="fas fa-map-marker-alt text-gray-500"></i>
+                        Location:
+                      </span>
+                      <span className="font-semibold text-gray-800 text-right">
+                        {branches.find((b) => b.id === bkBranchId)?.name}
+                      </span>
+                    </div>
+                    
+                    {/* Services */}
+                    <div className="pb-3 border-b border-gray-200">
+                      <span className="text-gray-600 font-medium block mb-3 text-sm sm:text-base flex items-center gap-2">
+                        <i className="fas fa-concierge-bell text-gray-500"></i>
+                        Services ({bkSelectedServices.length}):
+                      </span>
+                      <div className="space-y-2">
+                        {bkSelectedServices.map((serviceId) => {
+                          const service = servicesList.find((s) => String(s.id) === String(serviceId));
+                          const time = bkServiceTimes[String(serviceId)];
+                          return (
+                            <div key={String(serviceId)} className="bg-white rounded-lg p-3 border border-gray-200">
+                              <div className="flex justify-between items-center gap-2">
+                                <div className="min-w-0 flex-1">
+                                  <div className="font-semibold text-gray-800 text-sm sm:text-base truncate">{service?.name}</div>
+                                  <div className="text-[10px] sm:text-xs text-gray-600 mt-1">
+                                    <i className="fas fa-clock mr-1"></i>
+                                    {time} • {service?.duration} min
+                                  </div>
+                                </div>
+                                <div className="font-bold text-gray-800 text-sm sm:text-base flex-shrink-0">${service?.price}</div>
                               </div>
-                              );
-                            })}
                             </div>
-                          </div>
+                          );
+                        })}
+                      </div>
+                    </div>
 
-                <div className="flex items-center justify-between text-sm sm:text-base">
-                  <span className="text-gray-600 font-medium">Date:</span>
-                  <span className="font-semibold text-gray-800 text-right">
-                    {bkDate?.toLocaleDateString()}
-                  </span>
-                            </div>
-                <div className="flex items-center justify-between text-sm sm:text-base">
-                  <span className="text-gray-600 font-medium">Staff:</span>
-                  <span className="font-semibold text-gray-800 text-right truncate ml-2">
-                    {bkStaffId 
-                      ? staffList.find((st) => st.id === bkStaffId)?.name 
-                      : "Any Available"}
-                  </span>
-                      </div>
-                <div className="flex items-center justify-between pt-3 sm:pt-4 border-t-2 border-purple-300">
-                  <span className="text-gray-600 font-medium text-sm sm:text-base">Total Duration:</span>
-                  <span className="font-semibold text-gray-800 text-sm sm:text-base">
-                    {bkSelectedServices.reduce((sum: number, serviceId) => {
-                      const service = servicesList.find((s) => String(s.id) === String(serviceId));
-                      return sum + (Number(service?.duration) || 0);
-                    }, 0)} min
-                        </span>
-                      </div>
-                <div className="flex items-center justify-between pt-2 border-t-2 border-purple-300">
-                  <span className="text-gray-600 font-medium text-base sm:text-lg">Total Price:</span>
-                  <span className="font-bold text-2xl sm:text-3xl text-pink-600">
-                    ${bkSelectedServices.reduce((sum: number, serviceId) => {
-                      const service = servicesList.find((s) => String(s.id) === String(serviceId));
-                      return sum + (Number(service?.price) || 0);
-                          }, 0)}
-                        </span>
-                      </div>
-                            </div>
+                    {/* Date */}
+                    <div className="flex items-center justify-between text-sm sm:text-base pb-3 border-b border-gray-200">
+                      <span className="text-gray-600 font-medium flex items-center gap-2">
+                        <i className="fas fa-calendar text-gray-500"></i>
+                        Date:
+                      </span>
+                      <span className="font-semibold text-gray-800 text-right">
+                        {bkDate?.toLocaleDateString()}
+                      </span>
+                    </div>
 
-              {/* Notes */}
-                            <div>
-                <label className="block text-gray-700 font-semibold mb-2 text-sm sm:text-base">
-                  Additional Notes (Optional)
-                              </label>
-                <textarea
-                  value={bkNotes}
-                  onChange={(e) => setBkNotes(e.target.value)}
-                  placeholder="Any special requests or notes..."
-                  rows={3}
-                  className="w-full px-3 sm:px-4 py-2 sm:py-3 text-sm sm:text-base border border-gray-300 rounded-lg focus:ring-2 focus:ring-pink-500 focus:border-transparent"
-                ></textarea>
-                            </div>
+                    {/* Staff */}
+                    <div className="flex items-center justify-between text-sm sm:text-base pb-3 border-b border-gray-200">
+                      <span className="text-gray-600 font-medium flex items-center gap-2">
+                        <i className="fas fa-user-tie text-gray-500"></i>
+                        Staff:
+                      </span>
+                      <span className="font-semibold text-gray-800 text-right truncate ml-2">
+                        {bkStaffId 
+                          ? staffList.find((st) => st.id === bkStaffId)?.name 
+                          : "Any Available"}
+                      </span>
+                    </div>
+
+                    {/* Total Duration */}
+                    <div className="flex items-center justify-between pt-3 border-t-2 border-gray-300">
+                      <span className="text-gray-700 font-semibold text-sm sm:text-base flex items-center gap-2">
+                        <i className="fas fa-hourglass-half text-gray-500"></i>
+                        Total Duration:
+                      </span>
+                      <span className="font-bold text-gray-800 text-sm sm:text-base">
+                        {bkSelectedServices.reduce((sum: number, serviceId) => {
+                          const service = servicesList.find((s) => String(s.id) === String(serviceId));
+                          return sum + (Number(service?.duration) || 0);
+                        }, 0)} min
+                      </span>
+                    </div>
+
+                    {/* Total Price */}
+                    <div className="flex items-center justify-between pt-3 bg-white rounded-lg p-4 border-2 border-gray-300">
+                      <span className="text-gray-800 font-bold text-base sm:text-lg flex items-center gap-2">
+                        <i className="fas fa-dollar-sign text-gray-600"></i>
+                        Total Price:
+                      </span>
+                      <span className="font-black text-2xl sm:text-3xl text-gray-800">
+                        ${bkSelectedServices.reduce((sum: number, serviceId) => {
+                          const service = servicesList.find((s) => String(s.id) === String(serviceId));
+                          return sum + (Number(service?.price) || 0);
+                        }, 0)}
+                      </span>
+                    </div>
+                  </div>
+                </div>
+              </div>
 
               {/* Navigation Buttons */}
               <div className="flex justify-between items-center gap-3 pt-6 sm:pt-8 mt-6 sm:mt-8 border-t-2 border-gray-100">
                 <button
                   onClick={() => setBkStep(2)}
                   className="px-6 sm:px-8 py-3 border-2 border-gray-300 text-gray-700 font-semibold text-sm sm:text-base rounded-lg hover:bg-gray-50 transition-all"
-                            >
+                >
                   <i className="fas fa-arrow-left mr-2"></i>
                   Back
-                            </button>
-                            <button
-                    onClick={handleConfirmBooking}
+                </button>
+                <button
+                  onClick={handleConfirmBooking}
                   disabled={submittingBooking}
                   className={`px-6 sm:px-8 py-3 sm:py-4 rounded-lg font-bold text-sm sm:text-base text-white transition-all ${
                     submittingBooking
@@ -1417,21 +1510,21 @@ function BookPageContent() {
                       : "bg-gradient-to-r from-pink-600 to-purple-600 hover:shadow-2xl hover:scale-105"
                   }`}
                 >
-                    {submittingBooking ? (
-                      <>
-                        <i className="fas fa-spinner fa-spin mr-2"></i>
-                        Confirming...
-                      </>
-                    ) : (
-                      <>
-                        <i className="fas fa-check-circle mr-2"></i>
-                        Confirm Booking
-                      </>
-                    )}
-                            </button>
+                  {submittingBooking ? (
+                    <>
+                      <i className="fas fa-spinner fa-spin mr-2"></i>
+                      Confirming...
+                    </>
+                  ) : (
+                    <>
+                      <i className="fas fa-check-circle mr-2"></i>
+                      Confirm Booking
+                    </>
+                  )}
+                </button>
               </div>
-                      </div>
-                    )}
+            </div>
+          )}
                     </div>
                 </div>
 
@@ -1516,6 +1609,11 @@ function BookPageContent() {
         customerUid={currentCustomer?.uid}
       />
 
+      {/* Google Fonts - Open Sans */}
+      <link rel="preconnect" href="https://fonts.googleapis.com" />
+      <link rel="preconnect" href="https://fonts.gstatic.com" crossOrigin="anonymous" />
+      <link href="https://fonts.googleapis.com/css2?family=Open+Sans:wght@300;400;500;600;700;800&display=swap" rel="stylesheet" />
+      
       {/* Font Awesome */}
       <link rel="stylesheet" href="https://cdnjs.cloudflare.com/ajax/libs/font-awesome/6.4.0/css/all.min.css" />
     </div>
