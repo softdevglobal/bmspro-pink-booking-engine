@@ -37,7 +37,15 @@ export type BookingInput = {
   price: number;
   ownerUid: string; // Required for booking engine
   customerUid?: string; // Customer account UID (for authenticated bookings)
-  services?: Array<{ id: string | number; name?: string; price?: number; duration?: number }>; // Multiple services details
+  services?: Array<{ 
+    id: string | number; 
+    name?: string; 
+    price?: number; 
+    duration?: number;
+    time?: string;
+    staffId?: string | null;
+    staffName?: string | null;
+  }>; // Multiple services details
 };
 
 export async function createBooking(input: BookingInput): Promise<{ id: string; bookingCode?: string }> {

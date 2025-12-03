@@ -38,7 +38,7 @@ function BookPageContent() {
   const [bkBranchId, setBkBranchId] = useState<string | null>(null);
   const [bkSelectedServices, setBkSelectedServices] = useState<Array<number | string>>([]); // Multiple services
   const [bkServiceTimes, setBkServiceTimes] = useState<Record<string, string>>({}); // Time for each service
-  const [bkStaffId, setBkStaffId] = useState<string | null>(null);
+  const [bkServiceStaff, setBkServiceStaff] = useState<Record<string, string>>({}); // Staff for each service
   const [bkMonthYear, setBkMonthYear] = useState<{ month: number; year: number }>(() => {
     const t = new Date();
     return { month: t.getMonth(), year: t.getFullYear() };
@@ -334,7 +334,7 @@ function BookPageContent() {
       setBkBranchId(null);
       setBkSelectedServices([]);
       setBkServiceTimes({});
-      setBkStaffId(null);
+      setBkServiceStaff({});
       setBkDate(null);
       setBkNotes("");
     } catch (error) {
@@ -398,6 +398,26 @@ function BookPageContent() {
     const slots: string[] = [];
     const startHour = 9;
     const endHour = 18;
+
+    // Get occupied slots if a staff member is selected for this service
+    const staffIdForService = forServiceId ? bkServiceStaff[String(forServiceId)] : null;
+    const relevantBookings = staffIdForService
+      ? bookings.filter(b => b.staffId === staffIdForService && b.status !== "Canceled")
+      : []; // If no staff selected, we might need to check if ANY staff is available, but for now let's assume generic availability if no staff picked
+      // Actually, if no staff is picked ("Any Available"), we should ideally check if *at least one* staff is free.
+      // But the current logic didn't seem to do that deeply. Let's stick to: if staff selected, check their calendar.
+
+    const isSlotOccupied = (startMin: number, endMin: number) => {
+       if (!staffIdForService) return false; // optimizing for "Any"
+       // Check overlap with relevant bookings
+       // This is a simplified check; real system might need more complex availability
+       return relevantBookings.some(b => {
+         const bStart = b.time.split(':').map(Number);
+         const bStartMin = bStart[0] * 60 + bStart[1];
+         const bEndMin = bStartMin + b.duration;
+         return (startMin < bEndMin && endMin > bStartMin);
+       });
+    };
     
     for (let h = startHour; h < endHour; h++) {
       for (let m of [0, 30]) {
@@ -405,10 +425,11 @@ function BookPageContent() {
         
         // Check if this slot + duration fits within working hours
         const [hours, minutes] = timeStr.split(':').map(Number);
-        const slotEndMinutes = hours * 60 + minutes + serviceDuration;
+        const slotStartMinutes = hours * 60 + minutes;
+        const slotEndMinutes = slotStartMinutes + serviceDuration;
         const endHourMinutes = endHour * 60;
         
-        if (slotEndMinutes <= endHourMinutes) {
+        if (slotEndMinutes <= endHourMinutes && !isSlotOccupied(slotStartMinutes, slotEndMinutes)) {
           slots.push(timeStr);
         }
       }
@@ -422,8 +443,8 @@ function BookPageContent() {
     ? servicesList.filter((s) => !s.branches || s.branches.length === 0 || s.branches.includes(bkBranchId))
     : [];
 
-  // Filter staff based on branch, selected services, and availability on selected date
-  const availableStaff = (() => {
+  // Get available staff for a specific service
+  const getAvailableStaffForService = (serviceId: string | number) => {
     if (!bkBranchId) return [];
     
     // Get day of week from selected date
@@ -433,55 +454,31 @@ function BookPageContent() {
       dayOfWeek = days[bkDate.getDay()];
     }
     
-    let filtered = staffList.filter((st) => {
+    const service = servicesList.find(s => String(s.id) === String(serviceId));
+    
+    return staffList.filter((st) => {
       // Only show active staff
       if (st.status && st.status !== "Active") return false;
       
       // If date is selected, check weekly schedule
       if (dayOfWeek && (st as any).weeklySchedule) {
         const schedule = (st as any).weeklySchedule[dayOfWeek];
-        
-        // If schedule is null or undefined for this day, staff is not working
         if (!schedule) return false;
-        
-        // Check if staff works at the selected branch on this day
         if (schedule.branchId && schedule.branchId !== bkBranchId) return false;
       } else {
-        // If no date selected yet, use basic branch filter
         if (st.branchId && st.branchId !== bkBranchId) return false;
+      }
+      
+      // Check service capability
+      if (service?.staffIds && service.staffIds.length > 0) {
+         // Check both id and uid
+         const canPerform = service.staffIds.some(id => String(id) === st.id || String(id) === (st as any).uid);
+         if (!canPerform) return false;
       }
       
       return true;
     });
-
-    // If services are selected, filter by service staffIds
-    if (bkSelectedServices.length > 0) {
-      const selectedServiceObjects = bkSelectedServices
-        .map((serviceId) => servicesList.find((s) => String(s.id) === String(serviceId)))
-        .filter(Boolean);
-      
-      // Check if any service has staffIds restrictions
-      const servicesWithStaffRestrictions = selectedServiceObjects.filter(
-        (s) => s?.staffIds && s.staffIds.length > 0
-      );
-      
-      if (servicesWithStaffRestrictions.length > 0) {
-        // Get all staff IDs that can perform at least one of the selected services
-        const allowedStaffIds = new Set<string>();
-        servicesWithStaffRestrictions.forEach((service) => {
-          service?.staffIds?.forEach((staffId) => allowedStaffIds.add(String(staffId)));
-        });
-        
-        // Filter to only staff who can perform the services
-        // Check both id and uid fields since staffIds might reference either
-        filtered = filtered.filter((st) => 
-          allowedStaffIds.has(st.id) || allowedStaffIds.has((st as any).uid || "")
-        );
-      }
-    }
-
-    return filtered;
-  })();
+  };
   
   // Handle booking confirmation
   const handleConfirmBooking = async () => {
@@ -512,8 +509,20 @@ function BookPageContent() {
     const mainBookingTime = bkServiceTimes[String(firstServiceId)] || "";
     
     const selectedBranch = branches.find((b) => b.id === bkBranchId);
-    const selectedStaff = bkStaffId ? staffList.find((st) => st.id === bkStaffId) : null;
     
+    // Determine top-level staff info (if multiple/mixed, say "Multiple Staff" or similar)
+    const uniqueStaffIds = new Set(Object.values(bkServiceStaff).filter(Boolean));
+    let mainStaffId: string | null = null;
+    let mainStaffName = "Any Available";
+    
+    if (uniqueStaffIds.size === 1) {
+      const sid = Array.from(uniqueStaffIds)[0];
+      mainStaffId = sid;
+      mainStaffName = staffList.find(st => st.id === sid)?.name || "Any Available";
+    } else if (uniqueStaffIds.size > 1) {
+      mainStaffName = "Multiple Staff";
+    }
+
     try {
       const result = await createBooking({
         ownerUid,
@@ -523,8 +532,8 @@ function BookPageContent() {
         notes: bkNotes?.trim() || undefined,
         serviceId: serviceIds, // Multiple service IDs as comma-separated
         serviceName: serviceNames, // Multiple service names
-        staffId: bkStaffId || null,
-        staffName: selectedStaff?.name || "Any Available",
+        staffId: mainStaffId,
+        staffName: mainStaffName,
         branchId: bkBranchId,
         branchName: selectedBranch?.name || "",
         date: formatLocalYmd(bkDate),
@@ -533,13 +542,20 @@ function BookPageContent() {
         status: "Pending",
         price: totalPrice,
         customerUid: currentCustomer.uid,
-        services: selectedServiceObjects.map((s) => ({
-          id: s?.id || "",
-          name: s?.name || "",
-          price: s?.price || 0,
-          duration: s?.duration || 0,
-          time: bkServiceTimes[String(s?.id)] || ""
-        })),
+        services: selectedServiceObjects.map((s) => {
+          const sId = String(s?.id);
+          const stId = bkServiceStaff[sId];
+          const stName = stId ? staffList.find(st => st.id === stId)?.name : "Any Available";
+          return {
+            id: s?.id || "",
+            name: s?.name || "",
+            price: s?.price || 0,
+            duration: s?.duration || 0,
+            time: bkServiceTimes[sId] || "",
+            staffId: stId || null,
+            staffName: stName
+          };
+        }),
       });
       
       await incrementCustomerBookings(currentCustomer.uid);
@@ -547,14 +563,7 @@ function BookPageContent() {
       setBookingCode(result.bookingCode || "");
       setShowSuccess(true);
       
-      // Reset wizard
-      setBkStep(1);
-      setBkBranchId(null);
-      setBkSelectedServices([]);
-      setBkServiceTimes({});
-      setBkStaffId(null);
-      setBkDate(null);
-      setBkNotes("");
+      // We don't reset here anymore, we reset when closing the success modal
     } catch (error) {
       console.error("Error creating booking:", error);
       alert("Failed to create booking. Please try again.");
@@ -1096,11 +1105,11 @@ function BookPageContent() {
                     </div>
                 </div>
 
-                {/* Time Selection for Each Service */}
+                {/* Time & Staff Selection for Each Service */}
                 <div>
                   <h3 className="text-lg sm:text-xl font-bold text-gray-800 mb-3 sm:mb-4 flex items-center gap-2">
                     <i className="fas fa-clock text-purple-600 text-base sm:text-lg"></i>
-                    <span className="text-sm sm:text-xl">Select Time for Each Service</span>
+                    <span className="text-sm sm:text-xl">Select Staff & Time for Each Service</span>
                   </h3>
                   {!bkDate ? (
                     <div className="bg-gradient-to-br from-purple-50 to-pink-50 rounded-lg sm:rounded-xl p-4 text-center py-8 sm:py-12">
@@ -1113,45 +1122,111 @@ function BookPageContent() {
                       <p className="text-gray-500 text-xs sm:text-sm">Select services first</p>
                     </div>
                   ) : (
-                    <div className="space-y-3 sm:space-y-4">
+                    <div className="space-y-4 sm:space-y-6">
                       {bkSelectedServices.map((serviceId) => {
                         const service = servicesList.find((s) => String(s.id) === String(serviceId));
                         if (!service) return null;
                         
                         const slots = computeSlots(serviceId);
                         const selectedTime = bkServiceTimes[String(serviceId)];
+                        const selectedStaffId = bkServiceStaff[String(serviceId)];
+                        const availableStaffForService = getAvailableStaffForService(serviceId);
                         
                         return (
-                          <div key={String(serviceId)} className="bg-gradient-to-br from-purple-50 to-pink-50 rounded-lg sm:rounded-xl p-3 sm:p-4 border-2 border-purple-200">
-                            <div className="flex items-center justify-between mb-2 sm:mb-3">
-                              <div className="flex items-center gap-1.5 sm:gap-2 min-w-0 flex-1">
-                                <i className="fas fa-cut text-purple-600 text-xs sm:text-base flex-shrink-0"></i>
-                                <span className="font-bold text-gray-800 text-sm sm:text-base truncate">{service.name}</span>
-                              </div>
-                              <span className="text-[10px] sm:text-xs bg-white px-2 sm:px-3 py-1 rounded-full border border-purple-300 font-semibold text-purple-700 ml-2 flex-shrink-0">
-                                {service.duration}min
-                              </span>
-                            </div>
-                            <div className="grid grid-cols-3 sm:grid-cols-4 lg:grid-cols-6 gap-1.5 sm:gap-2">
-                              {slots.length === 0 ? (
-                                <div className="col-span-full text-center text-gray-400 py-4 text-xs">
-                                  No available slots
+                          <div key={String(serviceId)} className="bg-white rounded-lg sm:rounded-xl p-4 sm:p-5 border-2 border-purple-100 shadow-sm">
+                            <div className="flex items-center justify-between mb-4">
+                              <div className="flex items-center gap-2 sm:gap-3 min-w-0 flex-1">
+                                <div className="w-8 h-8 sm:w-10 sm:h-10 rounded-full bg-purple-100 flex items-center justify-center text-purple-600">
+                                  <i className="fas fa-cut text-xs sm:text-sm"></i>
                                 </div>
-                              ) : (
-                                slots.map((time) => (
+                                <div>
+                                  <div className="font-bold text-gray-800 text-sm sm:text-base truncate">{service.name}</div>
+                                  <div className="text-xs text-gray-500">{service.duration} min • ${service.price}</div>
+                                </div>
+                              </div>
+                            </div>
+
+                            {/* Staff Selection */}
+                            <div className="mb-4">
+                              <label className="text-xs font-bold text-gray-500 mb-2 block uppercase tracking-wide">Select Stylist</label>
+                              <div className="flex flex-wrap gap-2">
+                                <button
+                                  onClick={() => {
+                                    const newStaff = { ...bkServiceStaff };
+                                    delete newStaff[String(serviceId)];
+                                    setBkServiceStaff(newStaff);
+                                    // Reset time when staff changes
+                                    const newTimes = { ...bkServiceTimes };
+                                    delete newTimes[String(serviceId)];
+                                    setBkServiceTimes(newTimes);
+                                  }}
+                                  className={`flex items-center gap-2 px-3 py-2 rounded-lg border-2 transition-all ${
+                                    !selectedStaffId 
+                                      ? "border-indigo-500 bg-indigo-50 text-indigo-700" 
+                                      : "border-gray-100 bg-gray-50 text-gray-600 hover:border-indigo-200"
+                                  }`}
+                                >
+                                  <div className={`w-6 h-6 rounded-full flex items-center justify-center flex-shrink-0 ${!selectedStaffId ? "bg-indigo-200" : "bg-gray-200"}`}>
+                                    <i className="fas fa-random text-[10px]"></i>
+                                  </div>
+                                  <span className="text-xs font-medium">Any Staff</span>
+                                  {!selectedStaffId && <i className="fas fa-check-circle text-indigo-600 text-xs ml-1 flex-shrink-0"></i>}
+                                </button>
+
+                                {availableStaffForService.map((st) => (
                                   <button
-                                    key={time}
-                                    onClick={() => setBkServiceTimes({ ...bkServiceTimes, [String(serviceId)]: time })}
-                                    className={`py-1.5 sm:py-2 px-1 rounded-md sm:rounded-lg font-semibold text-[10px] sm:text-xs transition-all ${
-                                      selectedTime === time
-                                        ? "bg-gradient-to-r from-pink-600 to-purple-600 text-white shadow-lg"
-                                        : "bg-white text-gray-700 border border-purple-200 hover:border-pink-400"
+                                    key={st.id}
+                                    onClick={() => {
+                                      setBkServiceStaff({ ...bkServiceStaff, [String(serviceId)]: st.id });
+                                      // Reset time when staff changes
+                                      const newTimes = { ...bkServiceTimes };
+                                      delete newTimes[String(serviceId)];
+                                      setBkServiceTimes(newTimes);
+                                    }}
+                                    className={`flex items-center gap-2 px-3 py-2 rounded-lg border-2 transition-all ${
+                                      selectedStaffId === st.id
+                                        ? "border-indigo-500 bg-indigo-50 text-indigo-700" 
+                                        : "border-gray-100 bg-gray-50 text-gray-600 hover:border-indigo-200"
                                     }`}
                                   >
-                                    {time}
+                                    <div className="w-6 h-6 rounded-full overflow-hidden bg-gray-200 flex-shrink-0">
+                                      {st.avatar ? (
+                                        <img src={`https://api.dicebear.com/7.x/avataaars/svg?seed=${encodeURIComponent(st.avatar)}`} alt="" className="w-full h-full object-cover" />
+                                      ) : (
+                                        <div className="w-full h-full flex items-center justify-center bg-gray-300"><i className="fas fa-user text-[10px] text-gray-500"></i></div>
+                                      )}
+                                    </div>
+                                    <span className="text-xs font-medium">{st.name}</span>
+                                    {selectedStaffId === st.id && <i className="fas fa-check-circle text-indigo-600 text-xs ml-1 flex-shrink-0"></i>}
                                   </button>
-                                ))
-                              )}
+                                ))}
+                              </div>
+                            </div>
+
+                            {/* Time Selection */}
+                            <div>
+                              <label className="text-xs font-bold text-gray-500 mb-2 block uppercase tracking-wide">Select Time</label>
+                              <div className="grid grid-cols-3 sm:grid-cols-4 lg:grid-cols-5 gap-2">
+                                {slots.length === 0 ? (
+                                  <div className="col-span-full text-center text-gray-400 py-4 text-xs bg-gray-50 rounded-lg border border-gray-100 border-dashed">
+                                    No available slots for this staff/time combination
+                                  </div>
+                                ) : (
+                                  slots.map((time) => (
+                                    <button
+                                      key={time}
+                                      onClick={() => setBkServiceTimes({ ...bkServiceTimes, [String(serviceId)]: time })}
+                                      className={`py-2 px-1 rounded-lg font-semibold text-xs transition-all ${
+                                        selectedTime === time
+                                          ? "bg-gradient-to-r from-pink-600 to-purple-600 text-white shadow-md transform scale-105"
+                                          : "bg-white text-gray-700 border border-gray-200 hover:border-pink-300 hover:bg-pink-50"
+                                      }`}
+                                    >
+                                      {time}
+                                    </button>
+                                  ))
+                                )}
+                              </div>
                             </div>
                           </div>
                         );
@@ -1160,129 +1235,6 @@ function BookPageContent() {
                   )}
                 </div>
 
-                {/* Staff Selection - Separate Section with More Gap */}
-                <div className="pt-6 sm:pt-8 border-t-2 border-gray-100">
-                  <h3 className="text-lg sm:text-xl font-bold text-gray-800 mb-4 sm:mb-6 flex items-center gap-2">
-                    <i className="fas fa-user text-indigo-600 text-base sm:text-lg"></i>
-                    Select Staff <span className="text-sm sm:text-base font-normal text-gray-500">(Optional)</span>
-                  </h3>
-                  <div className="space-y-3">
-                              <button
-                      onClick={() => setBkStaffId(null)}
-                      className={`w-full text-left border-2 rounded-xl p-4 transition-all ${
-                        bkStaffId === null
-                          ? "border-indigo-500 bg-indigo-50 shadow-md"
-                          : "border-gray-200 hover:border-indigo-300"
-                                }`}
-                              >
-                                <div className="flex items-center gap-4">
-                        <div className={`w-12 h-12 rounded-full flex items-center justify-center ${
-                          bkStaffId === null ? "bg-indigo-100" : "bg-gray-100"
-                        }`}>
-                          <i className={`fas fa-random text-lg ${
-                            bkStaffId === null ? "text-indigo-600" : "text-gray-400"
-                          }`}></i>
-                </div>
-                        <div className="flex-1">
-                          <div className="font-semibold text-gray-800 text-base">Any Available Staff</div>
-                          <div className="text-sm text-gray-500">We'll assign the best available</div>
-                                    </div>
-                        {bkStaffId === null && (
-                          <i className="fas fa-check-circle text-indigo-600 text-xl"></i>
-                                  )}
-                                </div>
-                              </button>
-
-                    {/* Show available staff members */}
-                    {availableStaff.length > 0 && (
-                      <div className="space-y-3 pt-2">
-                        <div className="flex items-center justify-between px-2 mb-2">
-                          <div className="text-sm font-semibold text-gray-600">
-                            Or choose a specific staff member:
-                    </div>
-                          {bkDate && (
-                            <div className="text-xs bg-green-100 text-green-700 px-2 py-1 rounded-full font-medium">
-                              <i className="fas fa-check-circle mr-1"></i>
-                              {availableStaff.length} available
-                  </div>
-                          )}
-                        </div>
-                        {availableStaff.map((staff) => {
-                          // Get staff's branch for the selected day
-                          const staffAny = staff as any;
-                          let dayBranch = staffAny.branchName || branches.find(b => b.id === staff.branchId)?.name || "";
-                          if (bkDate && staffAny.weeklySchedule) {
-                            const days = ["Sunday", "Monday", "Tuesday", "Wednesday", "Thursday", "Friday", "Saturday"];
-                            const dayOfWeek = days[bkDate.getDay()];
-                            const daySchedule = staffAny.weeklySchedule[dayOfWeek];
-                            if (daySchedule?.branchName) {
-                              dayBranch = daySchedule.branchName;
-                            }
-                          }
-                          
-                            return (
-                              <button
-                              key={staff.id}
-                              onClick={() => setBkStaffId(staff.id)}
-                              className={`w-full text-left border-2 rounded-xl p-4 transition-all ${
-                                bkStaffId === staff.id
-                                  ? "border-indigo-500 bg-indigo-50 shadow-md"
-                                  : "border-gray-200 hover:border-indigo-300"
-                                }`}
-                              >
-                                <div className="flex items-center gap-4">
-                                <div className={`w-12 h-12 rounded-full overflow-hidden flex items-center justify-center ${
-                                  bkStaffId === staff.id ? "bg-indigo-100 ring-2 ring-indigo-500" : "bg-gray-100"
-                                }`}>
-                                  {staff.avatar ? (
-                                    <img 
-                                      src={`https://api.dicebear.com/7.x/avataaars/svg?seed=${encodeURIComponent(staff.avatar)}`}
-                                      alt={staff.name}
-                                      className="w-full h-full object-cover"
-                                    />
-                                  ) : (
-                                    <i className={`fas fa-user text-lg ${
-                                      bkStaffId === staff.id ? "text-indigo-600" : "text-gray-400"
-                                    }`}></i>
-                                  )}
-                                  </div>
-                                <div className="flex-1">
-                                  <div className="font-semibold text-gray-800 text-base">{staff.name}</div>
-                                  <div className="flex items-center gap-2 mt-1">
-                                    <span className="text-sm text-gray-500">
-                                      {(staff as any).staffRole || staff.role || "Staff Member"}
-                                    </span>
-                                    {dayBranch && (
-                                      <>
-                                        <span className="text-gray-300">•</span>
-                                        <span className="text-xs text-green-600 font-medium">
-                                          <i className="fas fa-calendar-check mr-1"></i>
-                                          {dayBranch}
-                                        </span>
-                                      </>
-                                    )}
-                                    </div>
-                                  </div>
-                                {bkStaffId === staff.id && (
-                                  <i className="fas fa-check-circle text-indigo-600 text-xl"></i>
-                                  )}
-                                </div>
-                              </button>
-                            );
-                        })}
-                    </div>
-                    )}
-
-                    {/* Show message if no staff available */}
-                    {availableStaff.length === 0 && (
-                      <div className="bg-gray-50 rounded-xl p-6 text-center border-2 border-dashed border-gray-300">
-                        <i className="fas fa-user-slash text-3xl text-gray-300 mb-2"></i>
-                        <p className="text-gray-500 text-sm">No specific staff available for selected services</p>
-                        <p className="text-xs text-gray-400 mt-1">We'll assign the best available staff</p>
-                    </div>
-                          )}
-                  </div>
-                        </div>
                           </div>
 
               {/* Navigation Buttons */}
@@ -1419,14 +1371,17 @@ function BookPageContent() {
                         {bkSelectedServices.map((serviceId) => {
                           const service = servicesList.find((s) => String(s.id) === String(serviceId));
                           const time = bkServiceTimes[String(serviceId)];
+                          const staffId = bkServiceStaff[String(serviceId)];
+                          const staffName = staffId ? staffList.find(s => s.id === staffId)?.name : "Any Staff";
+                          
                           return (
                             <div key={String(serviceId)} className="bg-white rounded-lg p-3 border border-gray-200">
                               <div className="flex justify-between items-center gap-2">
                                 <div className="min-w-0 flex-1">
                                   <div className="font-semibold text-gray-800 text-sm sm:text-base truncate">{service?.name}</div>
                                   <div className="text-[10px] sm:text-xs text-gray-600 mt-1">
-                                    <i className="fas fa-clock mr-1"></i>
-                                    {time} • {service?.duration} min
+                                    <span className="mr-3"><i className="fas fa-clock mr-1"></i> {time} ({service?.duration} min)</span>
+                                    <span className="block sm:inline sm:ml-0 mt-1 sm:mt-0"><i className="fas fa-user mr-1"></i> {staffName}</span>
                                   </div>
                                 </div>
                                 <div className="font-bold text-gray-800 text-sm sm:text-base flex-shrink-0">${service?.price}</div>
@@ -1448,18 +1403,6 @@ function BookPageContent() {
                       </span>
                     </div>
 
-                    {/* Staff */}
-                    <div className="flex items-center justify-between text-sm sm:text-base pb-3 border-b border-gray-200">
-                      <span className="text-gray-600 font-medium flex items-center gap-2">
-                        <i className="fas fa-user-tie text-gray-500"></i>
-                        Staff:
-                      </span>
-                      <span className="font-semibold text-gray-800 text-right truncate ml-2">
-                        {bkStaffId 
-                          ? staffList.find((st) => st.id === bkStaffId)?.name 
-                          : "Any Available"}
-                      </span>
-                    </div>
 
                     {/* Total Duration */}
                     <div className="flex items-center justify-between pt-3 border-t-2 border-gray-300">
@@ -1554,14 +1497,16 @@ function BookPageContent() {
                     {bkSelectedServices.map((serviceId) => {
                       const service = servicesList.find((s) => String(s.id) === String(serviceId));
                               const time = bkServiceTimes[String(serviceId)];
+                              const staffId = bkServiceStaff[String(serviceId)];
+                              const staffName = staffId ? staffList.find(s => s.id === staffId)?.name : "Any Staff";
                               return (
                         <div key={String(serviceId)} className="bg-white rounded-lg p-3 border border-purple-200 flex justify-between items-center">
                           <div>
                             <div className="font-semibold text-gray-800">{service?.name}</div>
                             <div className="text-xs text-purple-600 mt-1">
-                              <i className="fas fa-clock mr-1"></i>
-                              {time}
-                                  </div>
+                              <span className="mr-2"><i className="fas fa-clock mr-1"></i> {time}</span>
+                              <span className="text-gray-500"><i className="fas fa-user mr-1"></i> {staffName}</span>
+                            </div>
                           </div>
                           <div className="text-right">
                             <div className="text-sm text-gray-500">{service?.duration} min</div>
@@ -1590,6 +1535,12 @@ function BookPageContent() {
                 onClick={() => {
                   setShowSuccess(false);
                   setBkStep(1);
+                  setBkBranchId(null);
+                  setBkSelectedServices([]);
+                  setBkServiceTimes({});
+                  setBkServiceStaff({});
+                  setBkDate(null);
+                  setBkNotes("");
                 }}
                 className="w-full px-6 py-3 bg-gradient-to-r from-pink-600 to-purple-600 text-white font-semibold rounded-lg hover:shadow-lg transition-all"
               >

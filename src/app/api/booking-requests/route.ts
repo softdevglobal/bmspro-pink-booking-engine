@@ -23,7 +23,15 @@ type CreateBookingRequestInput = {
   status?: string;
   price: number;
   customerUid?: string; // Customer account UID (for authenticated bookings)
-  services?: Array<{ id: string | number; name?: string; price?: number; duration?: number }>; // Multiple services
+  services?: Array<{ 
+    id: string | number; 
+    name?: string; 
+    price?: number; 
+    duration?: number;
+    time?: string;
+    staffId?: string | null;
+    staffName?: string | null;
+  }>; // Multiple services
 };
 
 export async function POST(req: NextRequest) {

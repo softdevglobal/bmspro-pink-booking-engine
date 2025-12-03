@@ -178,16 +178,16 @@ export default function NotificationPanel({
       />
 
       {/* Panel */}
-      <div className="fixed top-20 right-6 w-full max-w-md bg-white rounded-2xl shadow-2xl border border-gray-200 z-[70] max-h-[80vh] flex flex-col animate-slide-in overflow-hidden">
+      <div className="fixed inset-x-4 top-20 sm:top-20 sm:right-6 sm:left-auto w-auto sm:w-full sm:max-w-md bg-white rounded-2xl shadow-2xl border border-gray-200 z-[70] max-h-[80vh] sm:max-h-[80vh] flex flex-col animate-slide-in overflow-hidden">
         {/* Header */}
-        <div className="bg-gradient-to-r from-indigo-600 to-purple-600 p-5">
+        <div className="bg-gradient-to-r from-indigo-600 to-purple-600 p-4 sm:p-5">
           <div className="flex items-center justify-between">
-            <div className="flex items-center gap-3">
-              <div className="w-10 h-10 bg-white/20 backdrop-blur-sm rounded-full flex items-center justify-center">
-                <i className="fas fa-bell text-white text-lg"></i>
+            <div className="flex items-center gap-2 sm:gap-3 min-w-0">
+              <div className="w-9 h-9 sm:w-10 sm:h-10 bg-white/20 backdrop-blur-sm rounded-full flex items-center justify-center flex-shrink-0">
+                <i className="fas fa-bell text-white text-base sm:text-lg"></i>
               </div>
-              <div>
-                <h3 className="text-xl font-bold text-white">Notifications</h3>
+              <div className="min-w-0">
+                <h3 className="text-lg sm:text-xl font-bold text-white truncate">Notifications</h3>
                 {unreadCount > 0 && (
                   <p className="text-white/80 text-xs">{unreadCount} unread</p>
                 )}
@@ -195,7 +195,7 @@ export default function NotificationPanel({
             </div>
             <button
               onClick={onClose}
-              className="w-8 h-8 flex items-center justify-center rounded-full hover:bg-white/20 transition-colors text-white"
+              className="w-8 h-8 flex items-center justify-center rounded-full hover:bg-white/20 transition-colors text-white flex-shrink-0"
               aria-label="Close"
             >
               <i className="fas fa-times text-lg"></i>
@@ -204,10 +204,10 @@ export default function NotificationPanel({
           
           {/* Filter Tabs */}
           {notifications.length > 0 && (
-            <div className="flex gap-2 mt-4">
+            <div className="flex gap-2 mt-3 sm:mt-4">
               <button
                 onClick={() => setFilter("all")}
-                className={`px-4 py-1.5 rounded-full text-sm font-medium transition-all ${
+                className={`flex-1 sm:flex-none px-3 sm:px-4 py-1.5 rounded-full text-xs sm:text-sm font-medium transition-all ${
                   filter === "all"
                     ? "bg-white text-indigo-600 shadow-sm"
                     : "bg-white/20 text-white hover:bg-white/30"
@@ -217,7 +217,7 @@ export default function NotificationPanel({
               </button>
               <button
                 onClick={() => setFilter("unread")}
-                className={`px-4 py-1.5 rounded-full text-sm font-medium transition-all ${
+                className={`flex-1 sm:flex-none px-3 sm:px-4 py-1.5 rounded-full text-xs sm:text-sm font-medium transition-all ${
                   filter === "unread"
                     ? "bg-white text-indigo-600 shadow-sm"
                     : "bg-white/20 text-white hover:bg-white/30"
@@ -279,7 +279,7 @@ export default function NotificationPanel({
                   <div
                     key={notification.id}
                     onClick={() => !notification.read && markAsRead(notification.id!)}
-                    className={`p-4 transition-all cursor-pointer hover:bg-white relative ${
+                    className={`p-3 sm:p-4 transition-all cursor-pointer hover:bg-white relative ${
                       notification.read ? "bg-gray-50/50" : "bg-white"
                     }`}
                   >
@@ -288,16 +288,16 @@ export default function NotificationPanel({
                       <div className="absolute left-0 top-0 bottom-0 w-1 bg-gradient-to-b from-indigo-500 to-purple-500"></div>
                     )}
 
-                    <div className="flex items-start gap-3 pl-2">
+                    <div className="flex items-start gap-2 sm:gap-3 pl-2">
                       {/* Icon */}
-                      <div className={`flex-shrink-0 w-11 h-11 ${statusStyle.bg} rounded-xl flex items-center justify-center shadow-sm`}>
-                        <i className={`fas ${statusStyle.icon} ${statusStyle.iconColor} text-lg`}></i>
+                      <div className={`flex-shrink-0 w-10 h-10 sm:w-11 sm:h-11 ${statusStyle.bg} rounded-xl flex items-center justify-center shadow-sm`}>
+                        <i className={`fas ${statusStyle.icon} ${statusStyle.iconColor} text-base sm:text-lg`}></i>
                       </div>
 
                       {/* Content */}
                       <div className="flex-1 min-w-0">
                         <div className="flex items-start justify-between gap-2 mb-1">
-                          <h4 className={`font-semibold text-sm ${notification.read ? "text-gray-600" : "text-gray-900"}`}>
+                          <h4 className={`font-semibold text-xs sm:text-sm ${notification.read ? "text-gray-600" : "text-gray-900"} break-words`}>
                             {notification.title}
                           </h4>
                           {!notification.read && (
@@ -305,25 +305,25 @@ export default function NotificationPanel({
                           )}
                         </div>
 
-                        <p className={`text-sm mb-2.5 ${notification.read ? "text-gray-500" : "text-gray-700"}`}>
+                        <p className={`text-xs sm:text-sm mb-2.5 ${notification.read ? "text-gray-500" : "text-gray-700"} break-words`}>
                           {notification.message}
                         </p>
 
-                        <div className="flex items-center gap-2 flex-wrap">
-                          <span className={`inline-flex items-center gap-1.5 px-2.5 py-1 ${statusStyle.bg} ${statusStyle.text} rounded-full text-xs font-semibold`}>
-                            <span className={`w-1.5 h-1.5 ${statusStyle.badge} rounded-full`}></span>
-                            {notification.status}
+                        <div className="flex items-center gap-1.5 sm:gap-2 flex-wrap">
+                          <span className={`inline-flex items-center gap-1.5 px-2 sm:px-2.5 py-0.5 sm:py-1 ${statusStyle.bg} ${statusStyle.text} rounded-full text-[10px] sm:text-xs font-semibold`}>
+                            <span className={`w-1.5 h-1.5 ${statusStyle.badge} rounded-full flex-shrink-0`}></span>
+                            <span className="truncate">{notification.status}</span>
                           </span>
 
                           {notification.bookingCode && (
-                            <span className="inline-flex items-center gap-1 text-xs text-gray-500 font-medium">
-                              <i className="fas fa-ticket text-[10px]"></i>
-                              {notification.bookingCode}
+                            <span className="inline-flex items-center gap-1 text-[10px] sm:text-xs text-gray-500 font-medium truncate">
+                              <i className="fas fa-ticket text-[8px] sm:text-[10px] flex-shrink-0"></i>
+                              <span className="truncate">{notification.bookingCode}</span>
                             </span>
                           )}
 
-                          <span className="inline-flex items-center gap-1 text-xs text-gray-400 ml-auto">
-                            <i className="far fa-clock text-[10px]"></i>
+                          <span className="inline-flex items-center gap-1 text-[10px] sm:text-xs text-gray-400 ml-auto flex-shrink-0">
+                            <i className="far fa-clock text-[8px] sm:text-[10px]"></i>
                             {formatDate(notification.createdAt)}
                           </span>
                         </div>
@@ -342,9 +342,9 @@ export default function NotificationPanel({
             <button
               onClick={fetchNotifications}
               disabled={loading}
-              className="w-full py-2.5 px-4 bg-gradient-to-r from-indigo-600 to-purple-600 hover:from-indigo-700 hover:to-purple-700 text-white font-medium rounded-lg transition-all disabled:opacity-50 disabled:cursor-not-allowed flex items-center justify-center gap-2"
+              className="w-full py-2 sm:py-2.5 px-3 sm:px-4 bg-gradient-to-r from-indigo-600 to-purple-600 hover:from-indigo-700 hover:to-purple-700 text-white text-sm font-medium rounded-lg transition-all disabled:opacity-50 disabled:cursor-not-allowed flex items-center justify-center gap-2"
             >
-              <i className="fas fa-sync-alt"></i>
+              <i className="fas fa-sync-alt text-sm"></i>
               <span>Refresh</span>
             </button>
           </div>
