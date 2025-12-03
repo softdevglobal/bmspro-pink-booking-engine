@@ -1,33 +1,37 @@
 "use client";
 
 import Link from "next/link";
-import Navigation from "@/components/Navigation";
+import { useSearchParams } from "next/navigation";
+import { Suspense } from "react";
+
+function HomeContent() {
+  const searchParams = useSearchParams();
+  const DEFAULT_OWNER_UID = "0Z0k6PleLzLHXrYG8UdUKvp7DUt2";
+  const ownerUid = searchParams.get("ownerUid") || DEFAULT_OWNER_UID;
+
+  return (
+    <div className="min-h-screen bg-white flex items-center justify-center p-4">
+      <Link
+        href={`/book${ownerUid !== DEFAULT_OWNER_UID ? `?ownerUid=${ownerUid}` : ''}`}
+        className="px-12 py-4 bg-slate-900 hover:bg-slate-800 text-white text-xl font-semibold rounded-lg shadow-lg hover:shadow-xl transition-all"
+      >
+        Book Now
+      </Link>
+    </div>
+  );
+}
 
 export default function Home() {
   return (
-    <>
-      <Navigation />
-      <div className="min-h-screen bg-gradient-to-br from-pink-50 via-purple-50 to-indigo-50 flex items-center justify-center p-4">
-        <div className="max-w-4xl w-full text-center">
-          <h1 className="text-5xl md:text-6xl font-bold text-gray-800 mb-6">
-            Welcome to <span className="text-pink-600">BMS Pro Pink</span>
-          </h1>
-          <p className="text-xl text-gray-600 mb-8">
-            Book your beauty appointments online with ease
-          </p>
-          
-          <div className="max-w-md mx-auto">
-            <Link
-              href="/book"
-              className="block bg-pink-600 hover:bg-pink-700 text-white font-bold py-8 px-12 rounded-2xl shadow-lg hover:shadow-xl transition-all transform hover:scale-105"
-            >
-              <div className="text-5xl mb-4">📅</div>
-              <div className="text-2xl mb-2">Book Now</div>
-              <div className="text-sm opacity-90">Schedule your appointment and get notifications</div>
-            </Link>
-          </div>
+    <Suspense fallback={
+      <div className="min-h-screen flex items-center justify-center bg-gradient-to-br from-pink-50 to-purple-50">
+        <div className="text-center">
+          <div className="animate-spin w-12 h-12 border-4 border-pink-600 border-t-transparent rounded-full mx-auto mb-4"></div>
+          <p className="text-gray-600">Loading...</p>
         </div>
       </div>
-    </>
+    }>
+      <HomeContent />
+    </Suspense>
   );
 }

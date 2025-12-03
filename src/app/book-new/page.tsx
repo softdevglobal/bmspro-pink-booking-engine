@@ -36,14 +36,14 @@ function BookPageContent() {
   // Booking wizard state - 3 steps
   const [bkStep, setBkStep] = useState<1 | 2 | 3>(1);
   const [bkBranchId, setBkBranchId] = useState<string | null>(null);
-  const [bkSelectedServices, setBkSelectedServices] = useState<Array<number | string>>([]); // Multiple services
-  const [bkServiceTimes, setBkServiceTimes] = useState<Record<string, string>>({}); // Time for each service
+  const [bkServiceId, setBkServiceId] = useState<number | null>(null);
   const [bkStaffId, setBkStaffId] = useState<string | null>(null);
   const [bkMonthYear, setBkMonthYear] = useState<{ month: number; year: number }>(() => {
     const t = new Date();
     return { month: t.getMonth(), year: t.getFullYear() };
   });
   const [bkDate, setBkDate] = useState<Date | null>(null);
+  const [bkTime, setBkTime] = useState<string | null>(null);
   const [bkNotes, setBkNotes] = useState<string>("");
   const [submittingBooking, setSubmittingBooking] = useState<boolean>(false);
   const [showSuccess, setShowSuccess] = useState<boolean>(false);
@@ -78,10 +78,6 @@ function BookPageContent() {
               setIsAuthenticated(false);
               setCurrentCustomer(null);
               setShowAuthModal(true);
-              // Clear localStorage
-              if (typeof window !== "undefined") {
-                localStorage.removeItem("customerAuth");
-              }
               return;
             }
           }
@@ -97,39 +93,29 @@ function BookPageContent() {
           const customerRef = doc(db, "customers", user.uid);
           const customerSnap = await getDoc(customerRef);
           
-          const customerData = customerSnap.exists() 
-            ? {
+          if (customerSnap.exists()) {
+            const customerData = customerSnap.data();
+            setCurrentCustomer({
               uid: user.uid,
-                email: customerSnap.data().email || user.email,
-                fullName: customerSnap.data().fullName || user.displayName,
-                phone: customerSnap.data().phone || "",
-              }
-            : {
+              email: customerData.email || user.email,
+              fullName: customerData.fullName || user.displayName,
+              phone: customerData.phone || "",
+            });
+          } else {
+            setCurrentCustomer({
               uid: user.uid,
               email: user.email,
               fullName: user.displayName,
               phone: "",
-              };
-          
-          setCurrentCustomer(customerData);
-          
-          // Save to localStorage
-          if (typeof window !== "undefined") {
-            localStorage.setItem("customerAuth", JSON.stringify(customerData));
+            });
           }
         } catch (error: any) {
-          const customerData = {
+          setCurrentCustomer({
             uid: user.uid,
             email: user.email,
             fullName: user.displayName,
             phone: "",
-          };
-          setCurrentCustomer(customerData);
-          
-          // Save to localStorage
-          if (typeof window !== "undefined") {
-            localStorage.setItem("customerAuth", JSON.stringify(customerData));
-          }
+          });
         }
         
         setShowAuthModal(false);
@@ -137,10 +123,6 @@ function BookPageContent() {
         setIsAuthenticated(false);
         setCurrentCustomer(null);
         setShowAuthModal(true);
-        // Clear localStorage when not authenticated
-        if (typeof window !== "undefined") {
-          localStorage.removeItem("customerAuth");
-        }
       }
     });
 
@@ -153,33 +135,31 @@ function BookPageContent() {
 
     const loadData = async () => {
       try {
-        // Load owner/salon name via API
-        const ownerRes = await fetch(`/api/owner?ownerUid=${ownerUid}`);
-        if (ownerRes.ok) {
-          const ownerData = await ownerRes.json();
-          setSalonName(ownerData.salonName || "Salon");
+        const { doc, getDoc, collection, query, where, getDocs } = await import("firebase/firestore");
+        
+        // Load owner/salon name
+        const ownerDoc = await getDoc(doc(db, "users", ownerUid));
+        if (ownerDoc.exists()) {
+          setSalonName(ownerDoc.data().salonName || ownerDoc.data().displayName || "Salon");
         }
 
-        // Load branches via API
-        const branchesRes = await fetch(`/api/branches?ownerUid=${ownerUid}`);
-        if (branchesRes.ok) {
-          const branchesData = await branchesRes.json();
-          setBranches(branchesData.branches || []);
-        }
+        // Load branches
+        const branchesQuery = query(collection(db, "branches"), where("ownerUid", "==", ownerUid));
+        const branchesSnap = await getDocs(branchesQuery);
+        const branchesData = branchesSnap.docs.map((doc) => ({ id: doc.id, ...doc.data() } as any));
+        setBranches(branchesData);
 
-        // Load services via API
-        const servicesRes = await fetch(`/api/services?ownerUid=${ownerUid}`);
-        if (servicesRes.ok) {
-          const servicesData = await servicesRes.json();
-          setServicesList(servicesData.services || []);
-        }
+        // Load services
+        const servicesQuery = query(collection(db, "services"), where("ownerUid", "==", ownerUid));
+        const servicesSnap = await getDocs(servicesQuery);
+        const servicesData = servicesSnap.docs.map((doc) => ({ id: doc.id, ...doc.data() } as any));
+        setServicesList(servicesData);
 
-        // Load staff via API
-        const staffRes = await fetch(`/api/staff?ownerUid=${ownerUid}`);
-        if (staffRes.ok) {
-          const staffData = await staffRes.json();
-          setStaffList(staffData.staff || []);
-        }
+        // Load staff
+        const staffQuery = query(collection(db, "salonStaff"), where("ownerUid", "==", ownerUid));
+        const staffSnap = await getDocs(staffQuery);
+        const staffData = staffSnap.docs.map((doc) => ({ id: doc.id, ...doc.data() } as any));
+        setStaffList(staffData);
 
         setLoading(false);
       } catch (error) {
@@ -244,12 +224,14 @@ function BookPageContent() {
         throw new Error(data.error || "Registration failed");
       }
 
-      // Now login with the created credentials
-      setAuthEmail(authEmail);
-      setAuthPassword(authPassword);
-      await handleLogin();
+      // Sign in with the custom token
+      await signInWithCustomToken(auth, data.token);
+      await createCustomerDocument(auth.currentUser);
+      
+      setShowAuthModal(false);
     } catch (error: any) {
       setAuthError(error.message || "Registration failed");
+    } finally {
       setAuthLoading(false);
     }
   };
@@ -266,46 +248,27 @@ function BookPageContent() {
     setAuthLoading(true);
 
     try {
-      // Use direct Firebase Authentication
-      const { signInWithEmailAndPassword } = await import("firebase/auth");
-      const userCredential = await signInWithEmailAndPassword(auth, authEmail, authPassword);
-      
-      // User is now signed in
-      setIsAuthenticated(true);
-      
-      const customerData = {
-        uid: userCredential.user.uid,
-        email: userCredential.user.email || "",
-        fullName: userCredential.user.displayName || "",
-        phone: "",
-      };
-      
-      setCurrentCustomer(customerData);
-      
-      // Save to localStorage
-      if (typeof window !== "undefined") {
-        localStorage.setItem("customerAuth", JSON.stringify(customerData));
-        // Also save the auth token
-        const token = await userCredential.user.getIdToken();
-        localStorage.setItem("idToken", token);
+      const response = await fetch("/api/auth/login", {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({
+          email: authEmail,
+          password: authPassword,
+        }),
+      });
+
+      const data = await response.json();
+
+      if (!response.ok) {
+        throw new Error(data.error || "Login failed");
       }
+
+      // Sign in with the custom token
+      await signInWithCustomToken(auth, data.token);
       
       setShowAuthModal(false);
-      
-      // Clear form
-      setAuthEmail("");
-      setAuthPassword("");
     } catch (error: any) {
-      console.error("Login error:", error);
-      if (error.code === "auth/user-not-found" || error.code === "auth/wrong-password" || error.code === "auth/invalid-credential") {
-        setAuthError("Invalid email or password");
-      } else if (error.code === "auth/invalid-email") {
-        setAuthError("Invalid email format");
-      } else if (error.code === "auth/too-many-requests") {
-        setAuthError("Too many failed attempts. Please try again later.");
-      } else {
-        setAuthError(error.message || "Failed to login");
-      }
+      setAuthError(error.message || "Login failed");
     } finally {
       setAuthLoading(false);
     }
@@ -316,31 +279,9 @@ function BookPageContent() {
   };
 
   const confirmLogout = async () => {
-    try {
-      // Clear localStorage before signing out
-      if (typeof window !== "undefined") {
-        localStorage.removeItem("customerAuth");
-        localStorage.removeItem("idToken");
-      }
-      
-      await signOut(auth);
-      setIsAuthenticated(false);
-      setCurrentCustomer(null);
-      setShowAuthModal(true);
-      setShowLogoutConfirm(false);
-      
-      // Reset booking state
-      setBkStep(1);
-      setBkBranchId(null);
-      setBkSelectedServices([]);
-      setBkServiceTimes({});
-      setBkStaffId(null);
-      setBkDate(null);
-      setBkNotes("");
-    } catch (error) {
-      console.error("Logout error:", error);
-      setShowLogoutConfirm(false);
-    }
+    await signOut(auth);
+    setShowLogoutConfirm(false);
+    router.push("/");
   };
 
   const cancelLogout = () => {
@@ -385,15 +326,8 @@ function BookPageContent() {
   const monthName = new Date(bkMonthYear.year, bkMonthYear.month).toLocaleDateString("en", { month: "long", year: "numeric" });
 
   // Compute available time slots
-  const computeSlots = (forServiceId?: number | string): string[] => {
+  const computeSlots = (): string[] => {
     if (!bkDate) return [];
-    
-    // Get duration of the service we're scheduling
-    let serviceDuration = 60;
-    if (forServiceId) {
-      const service = servicesList.find((s) => String(s.id) === String(forServiceId));
-      serviceDuration = service?.duration || 60;
-    }
     
     const slots: string[] = [];
     const startHour = 9;
@@ -402,21 +336,13 @@ function BookPageContent() {
     for (let h = startHour; h < endHour; h++) {
       for (let m of [0, 30]) {
         const timeStr = `${String(h).padStart(2, "0")}:${String(m).padStart(2, "0")}`;
-        
-        // Check if this slot + duration fits within working hours
-        const [hours, minutes] = timeStr.split(':').map(Number);
-        const slotEndMinutes = hours * 60 + minutes + serviceDuration;
-        const endHourMinutes = endHour * 60;
-        
-        if (slotEndMinutes <= endHourMinutes) {
-          slots.push(timeStr);
-        }
+        slots.push(timeStr);
       }
     }
     
     return slots;
   };
-  
+
   // Filter services and staff based on selection
   const availableServices = bkBranchId
     ? servicesList.filter((s) => !s.branches || s.branches.length === 0 || s.branches.includes(bkBranchId))
@@ -428,35 +354,14 @@ function BookPageContent() {
 
   // Handle booking confirmation
   const handleConfirmBooking = async () => {
-    // Validate all required fields
-    if (!bkBranchId || bkSelectedServices.length === 0 || !bkDate || !currentCustomer) return;
-    
-    // Ensure all services have times selected
-    if (Object.keys(bkServiceTimes).length !== bkSelectedServices.length) {
-      alert("Please select a time for each service.");
-      return;
-    }
+    if (!bkBranchId || !bkServiceId || !bkDate || !bkTime || !currentCustomer) return;
 
     setSubmittingBooking(true);
-    
-    // Get selected service objects
-    const selectedServiceObjects = bkSelectedServices.map((serviceId) => 
-      servicesList.find((s) => String(s.id) === String(serviceId))
-    ).filter(Boolean);
-    
-    // Calculate totals
-    const totalPrice = selectedServiceObjects.reduce((sum, s) => sum + (s?.price || 0), 0);
-    const totalDuration = selectedServiceObjects.reduce((sum, s) => sum + (s?.duration || 0), 0);
-    const serviceNames = selectedServiceObjects.map((s) => s?.name || "").join(", ");
-    const serviceIds = selectedServiceObjects.map((s) => s?.id).join(",");
-    
-    // Use first service's time as main booking time
-    const firstServiceId = bkSelectedServices[0];
-    const mainBookingTime = bkServiceTimes[String(firstServiceId)] || "";
-    
+
+    const selectedService = servicesList.find((s) => String(s.id) === String(bkServiceId));
     const selectedBranch = branches.find((b) => b.id === bkBranchId);
     const selectedStaff = bkStaffId ? staffList.find((st) => st.id === bkStaffId) : null;
-    
+
     try {
       const result = await createBooking({
         ownerUid,
@@ -464,39 +369,32 @@ function BookPageContent() {
         clientEmail: currentCustomer.email || "",
         clientPhone: currentCustomer.phone || "",
         notes: bkNotes?.trim() || undefined,
-        serviceId: serviceIds, // Multiple service IDs as comma-separated
-        serviceName: serviceNames, // Multiple service names
+        serviceId: bkServiceId,
+        serviceName: selectedService?.name || "",
         staffId: bkStaffId || null,
         staffName: selectedStaff?.name || "Any Available",
         branchId: bkBranchId,
         branchName: selectedBranch?.name || "",
         date: formatLocalYmd(bkDate),
-        time: mainBookingTime,
-        duration: totalDuration,
+        time: bkTime,
+        duration: selectedService?.duration || 60,
         status: "Pending",
-        price: totalPrice,
+        price: selectedService?.price || 0,
         customerUid: currentCustomer.uid,
-        services: selectedServiceObjects.map((s) => ({
-          id: s?.id || "",
-          name: s?.name || "",
-          price: s?.price || 0,
-          duration: s?.duration || 0,
-          time: bkServiceTimes[String(s?.id)] || ""
-        })),
       });
-      
+
       await incrementCustomerBookings(currentCustomer.uid);
-      
+
       setBookingCode(result.bookingCode || "");
       setShowSuccess(true);
       
       // Reset wizard
       setBkStep(1);
       setBkBranchId(null);
-      setBkSelectedServices([]);
-      setBkServiceTimes({});
+      setBkServiceId(null);
       setBkStaffId(null);
       setBkDate(null);
+      setBkTime(null);
       setBkNotes("");
     } catch (error) {
       console.error("Error creating booking:", error);
@@ -520,210 +418,93 @@ function BookPageContent() {
     );
   }
 
-  // Authentication Modal - Creative Design
+  // Authentication Modal
   if (showAuthModal) {
     return (
-      <div className="min-h-screen flex items-center justify-center p-4 bg-gradient-to-br from-pink-50 via-purple-50 to-indigo-50 relative overflow-hidden">
-        {/* Animated Background Blobs */}
-        <div className="absolute inset-0 overflow-hidden">
-          <div className="absolute top-20 left-10 w-72 h-72 bg-pink-300 rounded-full mix-blend-multiply filter blur-3xl opacity-70 animate-blob"></div>
-          <div className="absolute top-40 right-10 w-72 h-72 bg-purple-300 rounded-full mix-blend-multiply filter blur-3xl opacity-70 animate-blob animation-delay-2000"></div>
-          <div className="absolute bottom-20 left-1/2 w-72 h-72 bg-indigo-300 rounded-full mix-blend-multiply filter blur-3xl opacity-70 animate-blob animation-delay-4000"></div>
-        </div>
-
-        {/* Auth Card */}
-        <div className="w-full max-w-md relative z-10">
-          <div className="bg-white/95 backdrop-blur-xl rounded-3xl shadow-2xl border border-white/50 p-8">
-            
-            {/* Toggle Switch */}
-            <div className="relative flex bg-gray-100 rounded-full p-1 mb-8">
-              <div 
-                className={`absolute top-1 h-[calc(100%-8px)] w-[calc(50%-4px)] bg-slate-900 rounded-full shadow-lg transition-all duration-300 ease-out ${
-                  authMode === "register" ? "translate-x-[calc(100%+4px)]" : "translate-x-0"
-                }`}
-              />
-              
-              <button
-                onClick={() => {
-                  setAuthMode("login");
-                  setAuthError("");
-                }}
-                disabled={authLoading}
-                className={`flex-1 py-3 rounded-full font-bold text-sm relative z-10 transition-all duration-300 ${
-                  authMode === "login"
-                    ? "text-white"
-                    : "text-gray-600 hover:text-gray-900"
-                }`}
-              >
-                <i className="fas fa-sign-in-alt mr-2"></i>
-                Login
-              </button>
-              <button
-                onClick={() => {
-                  setAuthMode("register");
-                  setAuthError("");
-                }}
-                disabled={authLoading}
-                className={`flex-1 py-3 rounded-full font-bold text-sm relative z-10 transition-all duration-300 ${
-                  authMode === "register"
-                    ? "text-white"
-                    : "text-gray-600 hover:text-gray-900"
-                }`}
-              >
-                <i className="fas fa-user-plus mr-2"></i>
-                Register
-              </button>
+      <div className="min-h-screen flex items-center justify-center bg-gradient-to-br from-pink-50 to-purple-50 p-4">
+        <div className="bg-white rounded-2xl shadow-2xl p-8 max-w-md w-full">
+          <div className="text-center mb-8">
+            <div className="inline-flex items-center justify-center w-16 h-16 bg-pink-100 rounded-full mb-4">
+              <i className="fas fa-user text-2xl text-pink-600"></i>
             </div>
-            
-            {/* Title */}
-            <div className="text-center mb-6">
-              <h2 className="text-3xl font-black text-slate-900 mb-2">
-                {authMode === "login" ? "Welcome Back!" : "Join Us Today!"}
-              </h2>
-              <p className="text-gray-600 text-sm">
-                {authMode === "login" 
-                  ? "Sign in to book your appointment" 
-                  : "Create your account to get started"}
-              </p>
+            <h2 className="text-2xl font-bold text-gray-800 mb-2">
+              {authMode === "login" ? "Welcome Back" : "Create Account"}
+            </h2>
+            <p className="text-gray-600">
+              {authMode === "login" ? "Sign in to book your appointment" : "Register to get started"}
+            </p>
+          </div>
+
+          {authError && (
+            <div className="mb-4 p-3 bg-red-50 border border-red-300 rounded-lg text-red-700 text-sm">
+              {authError}
             </div>
+          )}
 
-            {/* Error Message */}
-            {authError && (
-              <div className="mb-4 p-4 bg-red-50 border-l-4 border-red-500 rounded-lg animate-shake">
-                <div className="flex items-center gap-2">
-                  <i className="fas fa-exclamation-circle text-red-600"></i>
-                  <p className="text-red-700 text-sm font-medium">{authError}</p>
-                </div>
-              </div>
-            )}
-
-            {/* Form */}
-            <div className="space-y-4">
-              {authMode === "register" && (
-                <>
-              <div className="relative">
-                <div className="absolute left-4 top-1/2 -translate-y-1/2 text-slate-600">
-                  <i className="fas fa-user"></i>
-                </div>
+          <div className="space-y-4">
+            {authMode === "register" && (
+              <>
                 <input
                   type="text"
                   placeholder="Full Name"
                   value={authFullName}
                   onChange={(e) => setAuthFullName(e.target.value)}
-                  className="w-full pl-12 pr-4 py-3 bg-gray-50 border-2 border-gray-200 rounded-xl focus:outline-none focus:border-slate-900 focus:bg-white transition-all"
-                  disabled={authLoading}
+                  className="w-full px-4 py-3 border border-gray-300 rounded-lg focus:ring-2 focus:ring-pink-500 focus:border-transparent"
                 />
-              </div>
-              <div className="relative">
-                <div className="absolute left-4 top-1/2 -translate-y-1/2 text-slate-600">
-                  <i className="fas fa-phone"></i>
-                </div>
                 <input
                   type="tel"
                   placeholder="Phone Number"
                   value={authPhone}
                   onChange={(e) => setAuthPhone(e.target.value)}
-                  className="w-full pl-12 pr-4 py-3 bg-gray-50 border-2 border-gray-200 rounded-xl focus:outline-none focus:border-slate-900 focus:bg-white transition-all"
-                  disabled={authLoading}
+                  className="w-full px-4 py-3 border border-gray-300 rounded-lg focus:ring-2 focus:ring-pink-500 focus:border-transparent"
                 />
-              </div>
-                </>
-              )}
+              </>
+            )}
 
-              <div className="relative">
-                <div className="absolute left-4 top-1/2 -translate-y-1/2 text-slate-600">
-                  <i className="fas fa-envelope"></i>
-                </div>
-                <input
-                  type="email"
-                  placeholder="Email Address"
-                  value={authEmail}
-                  onChange={(e) => setAuthEmail(e.target.value)}
-                  className="w-full pl-12 pr-4 py-3 bg-gray-50 border-2 border-gray-200 rounded-xl focus:outline-none focus:border-slate-900 focus:bg-white transition-all"
-                  disabled={authLoading}
-                />
-              </div>
+            <input
+              type="email"
+              placeholder="Email"
+              value={authEmail}
+              onChange={(e) => setAuthEmail(e.target.value)}
+              className="w-full px-4 py-3 border border-gray-300 rounded-lg focus:ring-2 focus:ring-pink-500 focus:border-transparent"
+            />
 
-              <div className="relative">
-                <div className="absolute left-4 top-1/2 -translate-y-1/2 text-slate-600">
-                  <i className="fas fa-lock"></i>
-                </div>
-                <input
-                  type={showPassword ? "text" : "password"}
-                  placeholder="Password"
-                  value={authPassword}
-                  onChange={(e) => setAuthPassword(e.target.value)}
-                  className="w-full pl-12 pr-12 py-3 bg-gray-50 border-2 border-gray-200 rounded-xl focus:outline-none focus:border-slate-900 focus:bg-white transition-all"
-                  disabled={authLoading}
-                />
-                <button
-                  type="button"
-                  onClick={() => setShowPassword(!showPassword)}
-                  className="absolute right-4 top-1/2 -translate-y-1/2 text-gray-400 hover:text-slate-900 transition-colors"
-                  tabIndex={-1}
-                >
-                  <i className={`fas ${showPassword ? "fa-eye-slash" : "fa-eye"}`}></i>
-                </button>
-              </div>
-
-              {authMode === "register" && (
-                <p className="text-xs text-gray-500 flex items-center gap-2">
-                  <i className="fas fa-info-circle text-slate-600"></i>
-                  Password must be at least 6 characters
-                </p>
-              )}
-
+            <div className="relative">
+              <input
+                type={showPassword ? "text" : "password"}
+                placeholder="Password"
+                value={authPassword}
+                onChange={(e) => setAuthPassword(e.target.value)}
+                className="w-full px-4 py-3 border border-gray-300 rounded-lg focus:ring-2 focus:ring-pink-500 focus:border-transparent"
+              />
               <button
-                onClick={authMode === "login" ? handleLogin : handleRegister}
-                disabled={authLoading}
-                className={`w-full py-4 rounded-xl font-bold text-white transition-all transform shadow-lg ${
-                  authLoading
-                    ? "bg-gray-400 cursor-not-allowed"
-                    : "bg-slate-900 hover:bg-slate-800 hover:scale-105 hover:shadow-2xl active:scale-95"
-                }`}
+                type="button"
+                onClick={() => setShowPassword(!showPassword)}
+                className="absolute right-3 top-1/2 -translate-y-1/2 text-gray-500"
               >
-                {authLoading ? (
-                  <span className="flex items-center justify-center gap-2">
-                    <i className="fas fa-spinner fa-spin"></i>
-                    {authMode === "login" ? "Signing in..." : "Creating account..."}
-                  </span>
-                ) : (
-                  <span className="flex items-center justify-center gap-2 uppercase tracking-wider">
-                    <i className={`fas ${authMode === "login" ? "fa-sign-in-alt" : "fa-user-plus"}`}></i>
-                    {authMode === "login" ? "Sign In" : "Create Account"}
-                  </span>
-                )}
+                <i className={`fas ${showPassword ? "fa-eye-slash" : "fa-eye"}`}></i>
               </button>
             </div>
+
+            <button
+              onClick={authMode === "login" ? handleLogin : handleRegister}
+              disabled={authLoading}
+              className="w-full px-6 py-3 bg-pink-600 text-white font-semibold rounded-lg hover:bg-pink-700 transition disabled:bg-gray-400"
+            >
+              {authLoading ? "Please wait..." : authMode === "login" ? "Sign In" : "Register"}
+            </button>
+
+            <button
+              onClick={() => {
+                setAuthMode(authMode === "login" ? "register" : "login");
+                setAuthError("");
+              }}
+              className="w-full text-pink-600 hover:text-pink-700 font-medium"
+            >
+              {authMode === "login" ? "Don't have an account? Register" : "Already have an account? Sign In"}
+            </button>
           </div>
         </div>
-
-        {/* Animation Styles */}
-        <style jsx>{`
-          @keyframes blob {
-            0%, 100% { transform: translate(0, 0) scale(1); }
-            25% { transform: translate(20px, -30px) scale(1.1); }
-            50% { transform: translate(-20px, 20px) scale(0.9); }
-            75% { transform: translate(30px, 10px) scale(1.05); }
-          }
-          .animate-blob {
-            animation: blob 7s infinite;
-          }
-          .animation-delay-2000 {
-            animation-delay: 2s;
-          }
-          .animation-delay-4000 {
-            animation-delay: 4s;
-          }
-          @keyframes shake {
-            0%, 100% { transform: translateX(0); }
-            25% { transform: translateX(-10px); }
-            75% { transform: translateX(10px); }
-          }
-          .animate-shake {
-            animation: shake 0.3s ease-in-out;
-          }
-        `}</style>
       </div>
     );
   }
@@ -802,11 +583,11 @@ function BookPageContent() {
         <div className="relative z-10 px-6 py-12 text-center">
           <div className="inline-block px-6 py-2 bg-white/10 backdrop-blur-sm rounded-full text-white text-sm font-medium mb-4">
             WELCOME TO
-                </div>
+          </div>
           <h1 className="text-5xl font-bold text-white mb-2">{salonName}</h1>
           <p className="text-white/80">BOOK YOUR APPOINTMENT</p>
-                </div>
-                </div>
+        </div>
+      </div>
 
       {/* Main Content */}
       <div className="max-w-5xl mx-auto p-4 sm:p-6 lg:p-8">
@@ -826,19 +607,19 @@ function BookPageContent() {
                       : "bg-gray-200 text-gray-500"
                   }`}>
                     {bkStep > step.num ? <i className="fas fa-check" /> : step.num}
-                </div>
+                  </div>
                   <span className="text-xs text-gray-600 font-semibold text-center">{step.label}</span>
-              </div>
+                </div>
                 {i < 2 && (
                   <div className={`h-1 flex-1 mx-2 rounded transition-all ${
                     bkStep > step.num ? "bg-gradient-to-r from-pink-500 to-purple-500" : "bg-gray-300"
                   }`} />
                 )}
-            </div>
+              </div>
             ))}
           </div>
         </div>
-        
+
         {/* Step Content */}
         <div className="bg-white rounded-2xl shadow-xl p-6">
           {/* Step 1: Location & Service */}
@@ -851,16 +632,15 @@ function BookPageContent() {
                 </h3>
                 <div className="grid grid-cols-1 sm:grid-cols-2 gap-4">
                   {branches.map((branch) => (
-                            <button
+                    <button
                       key={branch.id}
-                              onClick={() => {
+                      onClick={() => {
                         setBkBranchId(branch.id);
-                                setBkSelectedServices([]);
-                        setBkServiceTimes({});
-                              }}
+                        setBkServiceId(null);
+                      }}
                       className={`text-left border-2 rounded-xl p-4 transition-all ${
                         bkBranchId === branch.id
-                                  ? "border-pink-500 bg-pink-50 shadow-lg" 
+                          ? "border-pink-500 bg-pink-50 shadow-lg"
                           : "border-gray-200 hover:border-pink-300"
                       }`}
                     >
@@ -871,19 +651,19 @@ function BookPageContent() {
                           <i className={`fas fa-store text-xl ${
                             bkBranchId === branch.id ? "text-pink-600" : "text-gray-400"
                           }`}></i>
-                                </div>
+                        </div>
                         <div className="flex-1">
                           <div className="font-semibold text-gray-800">{branch.name}</div>
                           <div className="text-sm text-gray-500">{branch.address}</div>
-                                  </div>
+                        </div>
                         {bkBranchId === branch.id && (
                           <i className="fas fa-check-circle text-pink-600 text-xl"></i>
-                                )}
-                              </div>
-                            </button>
+                        )}
+                      </div>
+                    </button>
                   ))}
-                    </div>
                 </div>
+              </div>
 
               <div className={!bkBranchId ? "opacity-50 pointer-events-none" : ""}>
                 <h3 className="text-xl font-bold text-gray-800 mb-4 flex items-center gap-2">
@@ -891,93 +671,62 @@ function BookPageContent() {
                   Select Service
                   {!bkBranchId && <span className="text-sm font-normal text-gray-500">(Select location first)</span>}
                 </h3>
-                  {!bkBranchId ? (
+                {!bkBranchId ? (
                   <div className="bg-gray-50 border-2 border-dashed border-gray-300 rounded-xl p-12 text-center">
                     <i className="fas fa-map-marker-alt text-5xl text-gray-300 mb-4"></i>
                     <p className="text-gray-500 font-medium">Select a location first</p>
-                    </div>
-                  ) : (
+                  </div>
+                ) : (
                   <div className="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-3 gap-4">
-                    {availableServices.map((service) => {
-                      const isSelected = bkSelectedServices.includes(service.id);
-                            return (
-                              <button
-                          key={service.id}
-                                onClick={() => {
-                            if (isSelected) {
-                                    // Remove service
-                              setBkSelectedServices(bkSelectedServices.filter((id) => id !== service.id));
-                              const newTimes = { ...bkServiceTimes };
-                              delete newTimes[String(service.id)];
-                              setBkServiceTimes(newTimes);
-                                  } else {
-                                    // Add service
-                              setBkSelectedServices([...bkSelectedServices, service.id]);
-                                  }
-                                }}
-                          className={`text-left border-2 rounded-xl p-4 transition-all ${
-                            isSelected
-                                    ? "border-purple-500 bg-purple-50 shadow-lg" 
-                              : "border-gray-200 hover:border-purple-300"
-                          }`}
-                        >
-                          <div className="flex flex-col gap-3">
-                            {/* Service Image */}
-                            <div className={`w-full aspect-square rounded-lg overflow-hidden flex items-center justify-center ${
-                              isSelected ? "bg-purple-100" : "bg-gray-100"
-                            }`}>
-                              {(service as any).imageUrl ? (
-                                <img 
-                                  src={(service as any).imageUrl} 
-                                  alt={service.name}
-                                  className="w-full h-full object-cover"
-                                />
-                              ) : (
-                                <i className={`fas fa-cut text-4xl ${
-                                  isSelected ? "text-purple-600" : "text-gray-400"
-                                }`}></i>
-                                    )}
-                                  </div>
-                            {/* Service Info */}
-                            <div className="flex-1">
-                              <div className="flex items-center justify-between mb-2">
-                                <div className="font-semibold text-gray-800">{service.name}</div>
-                                {isSelected && (
-                                  <i className="fas fa-check-circle text-purple-600 text-xl"></i>
-                                )}
-                                    </div>
-                              <div className="flex items-center gap-2 text-sm text-gray-500">
-                                <span className="flex items-center gap-1">
-                                  <i className="fas fa-clock text-xs"></i>
-                                  {service.duration} min
-                                      </span>
-                                <span className="text-gray-400">•</span>
-                                <span className="font-bold text-purple-600">${service.price}</span>
-                                    </div>
-                                  </div>
-                                </div>
-                              </button>
-                            );
-                        })}
-                    </div>
-                  )}
-                </div>
+                    {availableServices.map((service) => (
+                      <button
+                        key={service.id}
+                        onClick={() => setBkServiceId(service.id as number)}
+                        className={`text-left border-2 rounded-xl p-4 transition-all ${
+                          bkServiceId === service.id
+                            ? "border-purple-500 bg-purple-50 shadow-lg"
+                            : "border-gray-200 hover:border-purple-300"
+                        }`}
+                      >
+                        <div className="flex items-center gap-3">
+                          <div className={`w-12 h-12 rounded-lg flex items-center justify-center ${
+                            bkServiceId === service.id ? "bg-purple-100" : "bg-gray-100"
+                          }`}>
+                            <i className={`fas fa-cut text-xl ${
+                              bkServiceId === service.id ? "text-purple-600" : "text-gray-400"
+                            }`}></i>
+                          </div>
+                          <div className="flex-1">
+                            <div className="font-semibold text-gray-800">{service.name}</div>
+                            <div className="text-sm text-gray-500">
+                              {service.duration} min • ${service.price}
+                            </div>
+                          </div>
+                          {bkServiceId === service.id && (
+                            <i className="fas fa-check-circle text-purple-600 text-xl"></i>
+                          )}
+                        </div>
+                      </button>
+                    ))}
+                  </div>
+                )}
+              </div>
 
               <div className="flex justify-end pt-4">
                 <button
                   onClick={() => setBkStep(2)}
-                  disabled={!bkBranchId || bkSelectedServices.length === 0}
+                  disabled={!bkBranchId || !bkServiceId}
                   className={`px-8 py-3 rounded-lg font-semibold text-white transition-all ${
-                    bkBranchId && bkSelectedServices.length > 0
+                    bkBranchId && bkServiceId
                       ? "bg-gradient-to-r from-pink-600 to-purple-600 hover:shadow-lg"
                       : "bg-gray-300 cursor-not-allowed"
                   }`}
                 >
-                  Continue to Date & Time ({bkSelectedServices.length} service{bkSelectedServices.length !== 1 ? 's' : ''})
+                  Continue to Date & Time
                   <i className="fas fa-arrow-right ml-2"></i>
                 </button>
-                      </div>
-                    </div>
+              </div>
+            </div>
           )}
 
           {/* Step 2: Date, Time & Staff */}
@@ -994,32 +743,32 @@ function BookPageContent() {
                     <div className="flex items-center justify-between mb-4">
                       <button onClick={goPrevMonth} className="w-10 h-10 rounded-lg bg-white hover:bg-gray-100 flex items-center justify-center">
                         <i className="fas fa-chevron-left text-gray-600"></i>
-                          </button>
+                      </button>
                       <div className="font-semibold text-gray-800">{monthName}</div>
                       <button onClick={goNextMonth} className="w-10 h-10 rounded-lg bg-white hover:bg-gray-100 flex items-center justify-center">
                         <i className="fas fa-chevron-right text-gray-600"></i>
-                          </button>
-                        </div>
+                      </button>
+                    </div>
                     <div className="grid grid-cols-7 gap-1 text-xs font-semibold text-gray-600 mb-2">
-                          {["S", "M", "T", "W", "T", "F", "S"].map((d, i) => (
+                      {["S", "M", "T", "W", "T", "F", "S"].map((d, i) => (
                         <div key={i} className="text-center py-2">{d}</div>
-                          ))}
-                        </div>
+                      ))}
+                    </div>
                     <div className="grid grid-cols-7 gap-1">
                       {buildMonthCells().map((cell, idx) => {
                         const isSelected = cell.date && bkDate && 
                           cell.date.getTime() === bkDate.getTime();
-                          const today = new Date();
-                          today.setHours(0, 0, 0, 0);
+                        const today = new Date();
+                        today.setHours(0, 0, 0, 0);
                         const isPast = cell.date && cell.date < today;
 
-                          return (
+                        return (
                           <button
-                              key={idx}
-                            onClick={() => cell.date && !isPast && (setBkDate(cell.date), setBkServiceTimes({}))}
+                            key={idx}
+                            onClick={() => cell.date && !isPast && (setBkDate(cell.date), setBkTime(null))}
                             disabled={!cell.date || isPast}
                             className={`aspect-square rounded-lg text-sm font-medium transition-all ${
-                                isSelected 
+                              isSelected
                                 ? "bg-gradient-to-br from-pink-600 to-purple-600 text-white shadow-lg"
                                 : cell.date && !isPast
                                 ? "bg-white hover:bg-pink-50 text-gray-700"
@@ -1028,81 +777,49 @@ function BookPageContent() {
                           >
                             {cell.label}
                           </button>
-                          );
-                        })}
-                      </div>
-                    </div>
-                </div>
-
-                {/* Time Selection for Each Service */}
-                <div>
-                  <h3 className="text-xl font-bold text-gray-800 mb-4 flex items-center gap-2">
-                    <i className="fas fa-clock text-purple-600"></i>
-                    Select Time for Each Service
-                  </h3>
-                  {!bkDate ? (
-                    <div className="bg-gradient-to-br from-purple-50 to-pink-50 rounded-xl p-4 text-center py-12">
-                      <i className="fas fa-calendar-day text-4xl text-gray-300 mb-2"></i>
-                      <p className="text-gray-500 text-sm">Select a date first</p>
-                    </div>
-                  ) : bkSelectedServices.length === 0 ? (
-                    <div className="bg-gradient-to-br from-purple-50 to-pink-50 rounded-xl p-4 text-center py-12">
-                      <i className="fas fa-concierge-bell text-4xl text-gray-300 mb-2"></i>
-                      <p className="text-gray-500 text-sm">Select services first</p>
-                    </div>
-                  ) : (
-                    <div className="space-y-4">
-                      {bkSelectedServices.map((serviceId) => {
-                        const service = servicesList.find((s) => String(s.id) === String(serviceId));
-                        if (!service) return null;
-                        
-                        const slots = computeSlots(serviceId);
-                        const selectedTime = bkServiceTimes[String(serviceId)];
-                        
-                        return (
-                          <div key={String(serviceId)} className="bg-gradient-to-br from-purple-50 to-pink-50 rounded-xl p-4 border-2 border-purple-200">
-                            <div className="flex items-center justify-between mb-3">
-                              <div className="flex items-center gap-2">
-                                <i className="fas fa-cut text-purple-600"></i>
-                                <span className="font-bold text-gray-800">{service.name}</span>
-                              </div>
-                              <span className="text-xs bg-white px-3 py-1 rounded-full border border-purple-300 font-semibold text-purple-700">
-                                {service.duration} min
-                              </span>
-                            </div>
-                            <div className="grid grid-cols-4 sm:grid-cols-5 lg:grid-cols-6 gap-2">
-                              {slots.length === 0 ? (
-                                <div className="col-span-full text-center text-gray-400 py-4 text-xs">
-                                  No available slots
-                                </div>
-                              ) : (
-                                slots.map((time) => (
-                                  <button
-                                    key={time}
-                                    onClick={() => setBkServiceTimes({ ...bkServiceTimes, [String(serviceId)]: time })}
-                                    className={`py-2 px-1 rounded-lg font-semibold text-xs transition-all ${
-                                      selectedTime === time
-                                        ? "bg-gradient-to-r from-pink-600 to-purple-600 text-white shadow-lg"
-                                        : "bg-white text-gray-700 border border-purple-200 hover:border-pink-400"
-                                    }`}
-                                  >
-                                    {time}
-                                  </button>
-                                ))
-                              )}
-                            </div>
-                          </div>
                         );
                       })}
                     </div>
-                  )}
+                  </div>
+                </div>
+
+                {/* Time & Staff Selection */}
+                <div>
+                  <h3 className="text-xl font-bold text-gray-800 mb-4 flex items-center gap-2">
+                    <i className="fas fa-clock text-purple-600"></i>
+                    Select Time
+                  </h3>
+                  <div className="bg-gradient-to-br from-purple-50 to-pink-50 rounded-xl p-4 mb-4">
+                    {!bkDate ? (
+                      <div className="text-center py-12">
+                        <i className="fas fa-calendar-day text-4xl text-gray-300 mb-2"></i>
+                        <p className="text-gray-500 text-sm">Select a date first</p>
+                      </div>
+                    ) : (
+                      <div className="grid grid-cols-4 gap-2">
+                        {computeSlots().map((time) => (
+                          <button
+                            key={time}
+                            onClick={() => setBkTime(time)}
+                            className={`py-2 px-1 rounded-lg font-semibold text-sm transition-all ${
+                              bkTime === time
+                                ? "bg-gradient-to-r from-pink-600 to-purple-600 text-white shadow-lg"
+                                : "bg-white text-gray-700 border border-purple-200 hover:border-pink-400"
+                            }`}
+                          >
+                            {time}
+                          </button>
+                        ))}
+                      </div>
+                    )}
+                  </div>
 
                   <h3 className="text-xl font-bold text-gray-800 mb-4 flex items-center gap-2">
                     <i className="fas fa-user text-indigo-600"></i>
                     Select Staff (Optional)
                   </h3>
                   <div className="space-y-2">
-                              <button
+                    <button
                       onClick={() => setBkStaffId(null)}
                       className={`w-full text-left border-2 rounded-lg p-3 transition-all ${
                         bkStaffId === null
@@ -1117,18 +834,18 @@ function BookPageContent() {
                           <i className={`fas fa-random ${
                             bkStaffId === null ? "text-indigo-600" : "text-gray-400"
                           }`}></i>
-                    </div>
+                        </div>
                         <div className="flex-1">
                           <div className="font-semibold text-gray-800">Any Available Staff</div>
                           <div className="text-xs text-gray-500">We'll assign the best available</div>
-                  </div>
+                        </div>
                         {bkStaffId === null && (
                           <i className="fas fa-check-circle text-indigo-600"></i>
-                                  )}
-                        </div>
-                              </button>
+                        )}
+                      </div>
+                    </button>
                     {availableStaff.map((staff) => (
-                              <button
+                      <button
                         key={staff.id}
                         onClick={() => setBkStaffId(staff.id)}
                         className={`w-full text-left border-2 rounded-lg p-3 transition-all ${
@@ -1144,23 +861,23 @@ function BookPageContent() {
                             <i className={`fas fa-user ${
                               bkStaffId === staff.id ? "text-indigo-600" : "text-gray-400"
                             }`}></i>
-                                  </div>
+                          </div>
                           <div className="flex-1">
                             <div className="font-semibold text-gray-800">{staff.name}</div>
                             <div className="text-xs text-gray-500">{staff.role || "Staff Member"}</div>
-                                    </div>
+                          </div>
                           {bkStaffId === staff.id && (
                             <i className="fas fa-check-circle text-indigo-600"></i>
-                                  )}
-                                </div>
-                              </button>
+                          )}
+                        </div>
+                      </button>
                     ))}
-                    </div>
+                  </div>
                 </div>
               </div>
 
               <div className="flex justify-between pt-4">
-                        <button
+                <button
                   onClick={() => setBkStep(1)}
                   className="px-8 py-3 border-2 border-gray-300 text-gray-700 font-semibold rounded-lg hover:bg-gray-50 transition-all"
                 >
@@ -1169,19 +886,19 @@ function BookPageContent() {
                 </button>
                 <button
                   onClick={() => setBkStep(3)}
-                  disabled={!bkDate || Object.keys(bkServiceTimes).length !== bkSelectedServices.length}
+                  disabled={!bkDate || !bkTime}
                   className={`px-8 py-3 rounded-lg font-semibold text-white transition-all ${
-                    bkDate && Object.keys(bkServiceTimes).length === bkSelectedServices.length
+                    bkDate && bkTime
                       ? "bg-gradient-to-r from-pink-600 to-purple-600 hover:shadow-lg"
                       : "bg-gray-300 cursor-not-allowed"
                   }`}
                 >
                   Continue to Confirm
                   <i className="fas fa-arrow-right ml-2"></i>
-                        </button>
-                      </div>
-                        </div>
-                    )}
+                </button>
+              </div>
+            </div>
+          )}
 
           {/* Step 3: Confirm */}
           {bkStep === 3 && (
@@ -1197,39 +914,23 @@ function BookPageContent() {
                   <span className="font-semibold text-gray-800">
                     {branches.find((b) => b.id === bkBranchId)?.name}
                   </span>
-                        </div>
-                
-                {/* Multiple Services with Times */}
-                <div className="border-t border-purple-200 pt-4">
-                  <span className="text-gray-600 font-medium block mb-3">Services ({bkSelectedServices.length}):</span>
-                  <div className="space-y-2">
-                    {bkSelectedServices.map((serviceId) => {
-                      const service = servicesList.find((s) => String(s.id) === String(serviceId));
-                      const time = bkServiceTimes[String(serviceId)];
-                      return (
-                        <div key={String(serviceId)} className="bg-white rounded-lg p-3 border border-purple-200">
-                          <div className="flex justify-between items-center">
-                            <div>
-                              <div className="font-semibold text-gray-800">{service?.name}</div>
-                              <div className="text-xs text-purple-600 mt-1">
-                                <i className="fas fa-clock mr-1"></i>
-                                {time} • {service?.duration} min
-                          </div>
-                      </div>
-                            <div className="font-bold text-pink-600">${service?.price}</div>
-                    </div>
-                              </div>
-                      );
-                    })}
-                            </div>
-                          </div>
-
+                </div>
+                <div className="flex items-center justify-between">
+                  <span className="text-gray-600 font-medium">Service:</span>
+                  <span className="font-semibold text-gray-800">
+                    {servicesList.find((s) => String(s.id) === String(bkServiceId))?.name}
+                  </span>
+                </div>
                 <div className="flex items-center justify-between">
                   <span className="text-gray-600 font-medium">Date:</span>
                   <span className="font-semibold text-gray-800">
                     {bkDate?.toLocaleDateString()}
                   </span>
-                            </div>
+                </div>
+                <div className="flex items-center justify-between">
+                  <span className="text-gray-600 font-medium">Time:</span>
+                  <span className="font-semibold text-gray-800">{bkTime}</span>
+                </div>
                 <div className="flex items-center justify-between">
                   <span className="text-gray-600 font-medium">Staff:</span>
                   <span className="font-semibold text-gray-800">
@@ -1238,31 +939,19 @@ function BookPageContent() {
                       : "Any Available"}
                   </span>
                 </div>
-                <div className="flex items-center justify-between pt-4 border-t-2 border-purple-300">
-                  <span className="text-gray-600 font-medium">Total Duration:</span>
-                  <span className="font-semibold text-gray-800">
-                    {bkSelectedServices.reduce((sum, serviceId) => {
-                      const service = servicesList.find((s) => String(s.id) === String(serviceId));
-                      return sum + (service?.duration || 0);
-                    }, 0)} min
+                <div className="flex items-center justify-between pt-4 border-t border-purple-200">
+                  <span className="text-gray-600 font-medium">Total:</span>
+                  <span className="font-bold text-2xl text-pink-600">
+                    ${servicesList.find((s) => String(s.id) === String(bkServiceId))?.price}
                   </span>
                 </div>
-                <div className="flex items-center justify-between pt-2 border-t-2 border-purple-300">
-                  <span className="text-gray-600 font-medium text-lg">Total Price:</span>
-                  <span className="font-bold text-3xl text-pink-600">
-                    ${bkSelectedServices.reduce((sum, serviceId) => {
-                      const service = servicesList.find((s) => String(s.id) === String(serviceId));
-                      return sum + (service?.price || 0);
-                    }, 0)}
-                  </span>
-                </div>
-                            </div>
+              </div>
 
               {/* Notes */}
-                            <div>
+              <div>
                 <label className="block text-gray-700 font-semibold mb-2">
                   Additional Notes (Optional)
-                              </label>
+                </label>
                 <textarea
                   value={bkNotes}
                   onChange={(e) => setBkNotes(e.target.value)}
@@ -1270,18 +959,18 @@ function BookPageContent() {
                   rows={4}
                   className="w-full px-4 py-3 border border-gray-300 rounded-lg focus:ring-2 focus:ring-pink-500 focus:border-transparent"
                 ></textarea>
-                            </div>
+              </div>
 
               <div className="flex justify-between pt-4">
-                            <button
+                <button
                   onClick={() => setBkStep(2)}
                   className="px-8 py-3 border-2 border-gray-300 text-gray-700 font-semibold rounded-lg hover:bg-gray-50 transition-all"
-                            >
+                >
                   <i className="fas fa-arrow-left mr-2"></i>
                   Back
-                            </button>
-                            <button
-                    onClick={handleConfirmBooking}
+                </button>
+                <button
+                  onClick={handleConfirmBooking}
                   disabled={submittingBooking}
                   className={`px-8 py-4 rounded-lg font-bold text-white transition-all ${
                     submittingBooking
@@ -1289,32 +978,32 @@ function BookPageContent() {
                       : "bg-gradient-to-r from-pink-600 to-purple-600 hover:shadow-2xl hover:scale-105"
                   }`}
                 >
-                    {submittingBooking ? (
-                      <>
+                  {submittingBooking ? (
+                    <>
                       <i className="fas fa-spinner fa-spin mr-2"></i>
                       Confirming...
-                      </>
-                    ) : (
-                      <>
+                    </>
+                  ) : (
+                    <>
                       <i className="fas fa-check-circle mr-2"></i>
                       Confirm Booking
-                      </>
-                              )}
-                            </button>
-                        </div>
-                      </div>
-                    )}
-                    </div>
-                </div>
+                    </>
+                  )}
+                </button>
+              </div>
+            </div>
+          )}
+        </div>
+      </div>
 
       {/* Success Modal */}
       {showSuccess && (
         <div className="fixed inset-0 bg-black/50 backdrop-blur-sm flex items-center justify-center z-[100] p-4">
-          <div className="bg-white rounded-2xl shadow-2xl max-w-lg w-full p-8">
+          <div className="bg-white rounded-2xl shadow-2xl max-w-md w-full p-8">
             <div className="text-center">
               <div className="inline-flex items-center justify-center w-20 h-20 bg-green-100 rounded-full mb-6">
                 <i className="fas fa-check-circle text-4xl text-green-600"></i>
-                    </div>
+              </div>
               <h3 className="text-3xl font-bold text-gray-800 mb-4">
                 Booking Confirmed!
               </h3>
@@ -1322,50 +1011,12 @@ function BookPageContent() {
                 <div className="bg-gray-50 rounded-lg p-4 mb-4">
                   <p className="text-sm text-gray-600 mb-1">Your Booking Code</p>
                   <p className="text-2xl font-bold text-pink-600">{bookingCode}</p>
-                  </div>
+                </div>
               )}
-              
-              {/* Show booked services with times */}
-              {bkSelectedServices.length > 0 && (
-                <div className="bg-gradient-to-br from-purple-50 to-pink-50 rounded-xl p-4 mb-4 text-left">
-                  <p className="text-sm text-gray-600 font-semibold mb-3 text-center">Your Services:</p>
-                  <div className="space-y-2">
-                    {bkSelectedServices.map((serviceId) => {
-                      const service = servicesList.find((s) => String(s.id) === String(serviceId));
-                              const time = bkServiceTimes[String(serviceId)];
-                              return (
-                        <div key={String(serviceId)} className="bg-white rounded-lg p-3 border border-purple-200 flex justify-between items-center">
-                          <div>
-                            <div className="font-semibold text-gray-800">{service?.name}</div>
-                            <div className="text-xs text-purple-600 mt-1">
-                              <i className="fas fa-clock mr-1"></i>
-                              {time}
-                                  </div>
-                          </div>
-                          <div className="text-right">
-                            <div className="text-sm text-gray-500">{service?.duration} min</div>
-                            <div className="font-bold text-pink-600">${service?.price}</div>
-                                  </div>
-                                </div>
-                              );
-                            })}
-                          </div>
-                  <div className="mt-3 pt-3 border-t border-purple-200 flex justify-between items-center">
-                    <span className="font-semibold text-gray-700">Total:</span>
-                    <span className="font-bold text-xl text-pink-600">
-                      ${bkSelectedServices.reduce((sum, serviceId) => {
-                        const service = servicesList.find((s) => String(s.id) === String(serviceId));
-                        return sum + (service?.price || 0);
-                          }, 0)}
-                        </span>
-                      </div>
-                    </div>
-              )}
-
               <p className="text-gray-600 mb-6">
-                Your appointment{bkSelectedServices.length > 1 ? 's have' : ' has'} been successfully booked for {bkDate?.toLocaleDateString()}!
+                Your booking has been confirmed! We've sent you a confirmation email.
               </p>
-                <button
+              <button
                 onClick={() => {
                   setShowSuccess(false);
                   setBkStep(1);
@@ -1373,10 +1024,10 @@ function BookPageContent() {
                 className="w-full px-6 py-3 bg-gradient-to-r from-pink-600 to-purple-600 text-white font-semibold rounded-lg hover:shadow-lg transition-all"
               >
                 Book Another Appointment
-                </button>
-              </div>
+              </button>
             </div>
-      </div>
+          </div>
+        </div>
       )}
 
       {/* Notification Panel */}

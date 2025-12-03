@@ -5,7 +5,7 @@ export const runtime = "nodejs";
 
 export async function GET(req: NextRequest) {
   try {
-    const searchParams = req.nextUrl.searchParams;
+    const { searchParams } = new URL(req.url);
     const ownerUid = searchParams.get("ownerUid");
 
     if (!ownerUid) {
@@ -13,50 +13,24 @@ export async function GET(req: NextRequest) {
     }
 
     const db = adminDb();
-    
-    // Try to get owner document directly by UID
-    const ownerDoc = await db.doc(`users/${ownerUid}`).get();
-    
-    if (!ownerDoc.exists) {
+    const doc = await db.doc(`users/${ownerUid}`).get();
+
+    if (!doc.exists) {
       return NextResponse.json({ error: "Owner not found" }, { status: 404 });
     }
 
-    const ownerData = ownerDoc.data();
+    const data = doc.data();
+    // Try multiple fields to get the salon/business name
+    const salonName = data?.salonName || data?.name || data?.businessName || data?.displayName || "Salon";
     
-    // Get salon name from owner's displayName, name, or businessName field
-    const salonName = ownerData?.businessName || ownerData?.displayName || ownerData?.name || "Salon";
-
-    return NextResponse.json({ 
-      owner: {
-        uid: ownerUid,
-        name: ownerData?.displayName || ownerData?.name || "",
-        businessName: ownerData?.businessName || salonName,
-        salonName: salonName,
-        email: ownerData?.email || null,
-      }
+    return NextResponse.json({
+      salonName,
     });
-  } catch (e: any) {
-    console.error("Error fetching owner:", e);
-    
-    // Provide helpful error messages even in production
-    let errorMessage = "Internal error";
-    if (e?.message) {
-      if (e.message.includes("credentials") || e.message.includes("Firebase Admin")) {
-        errorMessage = "Server configuration error. Please contact support.";
-      } else if (e.message.includes("permission") || e.message.includes("PERMISSION_DENIED")) {
-        errorMessage = "Database permission error. Please contact support.";
-      } else if (process.env.NODE_ENV !== "production") {
-        errorMessage = e.message;
-      }
-    }
-    
+  } catch (error: any) {
+    console.error("Error fetching owner:", error);
     return NextResponse.json(
-      { 
-        error: errorMessage,
-        helpText: "If this error persists, please ensure Firebase Admin credentials are configured on the server."
-      },
+      { error: error.message || "Internal error" },
       { status: 500 }
     );
   }
 }
-
