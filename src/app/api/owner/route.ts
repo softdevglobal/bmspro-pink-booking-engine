@@ -14,7 +14,7 @@ export async function GET(req: NextRequest) {
 
     const db = adminDb();
     const doc = await db.doc(`users/${ownerUid}`).get();
-
+    
     if (!doc.exists) {
       return NextResponse.json({ error: "Owner not found" }, { status: 404 });
     }
@@ -22,8 +22,8 @@ export async function GET(req: NextRequest) {
     const data = doc.data();
     // Try multiple fields to get the salon/business name
     const salonName = data?.salonName || data?.name || data?.businessName || data?.displayName || "Salon";
-    
-    return NextResponse.json({
+
+    return NextResponse.json({ 
       salonName,
     });
   } catch (error: any) {

@@ -13,15 +13,29 @@ export async function GET(req: NextRequest) {
     }
 
     const db = adminDb();
+    
+    // Query users collection for staff members belonging to this owner
     const snapshot = await db
-      .collection("salonStaff")
+      .collection("users")
       .where("ownerUid", "==", ownerUid)
       .get();
 
-    const staff = snapshot.docs.map((doc) => ({
-      id: doc.id,
-      ...doc.data(),
-    }));
+    // Filter for staff roles only (not customers)
+    const staff = snapshot.docs
+      .map((doc) => {
+        const data = doc.data();
+        return {
+          id: doc.id,
+          ...data,
+          // Use uid or id for matching with staffIds in services
+          uid: data.uid || doc.id,
+        } as any;
+      })
+      .filter((user: any) => {
+        const role = (user.role || "").toString().toLowerCase();
+        // Include salon staff and branch admins
+        return role === "salon_staff" || role === "salon_branch_admin";
+      });
 
     return NextResponse.json({ staff });
   } catch (error: any) {

@@ -193,7 +193,7 @@ export function subscribeBookingsForOwnerAndDate(
     }
   );
 
-  // Subscribe to bookingRequests collection
+  // Subscribe to bookingRequests collection (silent fallback for permission errors)
   const q2 = query(
     collection(db, "bookingRequests"),
     where("ownerUid", "==", ownerUid),
@@ -207,7 +207,8 @@ export function subscribeBookingsForOwnerAndDate(
     },
     (error) => {
       if (error.code === "permission-denied") {
-        console.warn("Permission denied for bookingRequests query.");
+        // Silently ignore permission errors for customer booking engine
+        // Customers don't need access to bookingRequests, only confirmed bookings
         bookingRequestsData = [];
         mergeAndNotify();
       } else {
