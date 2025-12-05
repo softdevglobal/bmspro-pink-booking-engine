@@ -349,9 +349,9 @@ export default function NotificationPanel({
                             {notification.title}
                           </h4>
                           <div className="flex items-center gap-1.5 flex-shrink-0">
-                            {!notification.read && (
+                          {!notification.read && (
                               <span className="w-2 h-2 bg-indigo-500 rounded-full animate-pulse"></span>
-                            )}
+                          )}
                             {/* Delete button - visible on hover on desktop, always visible on mobile */}
                             <button
                               onClick={(e) => openDeleteConfirm(notification.id!, e)}
