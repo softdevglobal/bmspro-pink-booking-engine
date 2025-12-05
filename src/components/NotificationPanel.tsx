@@ -369,7 +369,46 @@ export default function NotificationPanel({
                         </p>
 
                         {/* Booking Details Section */}
-                        {(notification as any).serviceName || (notification as any).staffName || (notification as any).branchName ? (
+                        {((notification as any).services && (notification as any).services.length > 0) ? (
+                          <div className="mb-2.5 p-2 bg-gradient-to-r from-indigo-50 to-purple-50 rounded-lg border border-indigo-100">
+                            <div className="text-[10px] sm:text-xs font-semibold text-indigo-900 mb-1.5 border-b border-indigo-100 pb-1">
+                              Services Booked:
+                            </div>
+                            <div className="space-y-2">
+                              {(notification as any).services.map((svc: any, idx: number) => (
+                                <div key={idx} className="flex flex-col gap-0.5">
+                                  <div className="flex items-center gap-1.5">
+                                    <i className="fas fa-spa text-purple-600 flex-shrink-0 text-[10px]"></i>
+                                    <span className="text-gray-800 font-medium truncate text-[11px]">{svc.name}</span>
+                                  </div>
+                                  {svc.staffName && svc.staffName !== "Any Available" && svc.staffName !== "Any Staff" && (
+                                    <div className="flex items-center gap-1.5 ml-4">
+                                      <i className="fas fa-user-tie text-indigo-500 flex-shrink-0 text-[9px]"></i>
+                                      <span className="text-gray-600 text-[10px]">with {svc.staffName}</span>
+                                    </div>
+                                  )}
+                                </div>
+                              ))}
+                            </div>
+                            
+                            <div className="mt-2 pt-2 border-t border-indigo-100 space-y-1">
+                              {(notification as any).branchName && (
+                                <div className="flex items-center gap-1.5 text-[10px] sm:text-xs">
+                                  <i className="fas fa-map-marker-alt text-pink-600 flex-shrink-0"></i>
+                                  <span className="text-gray-700 font-medium truncate">{(notification as any).branchName}</span>
+                                </div>
+                              )}
+                              {(notification as any).bookingDate && (notification as any).bookingTime && (
+                                <div className="flex items-center gap-1.5 text-[10px] sm:text-xs">
+                                  <i className="far fa-calendar text-blue-600 flex-shrink-0"></i>
+                                  <span className="text-gray-700 font-medium">{(notification as any).bookingDate} at {(notification as any).bookingTime}</span>
+                                </div>
+                              )}
+                            </div>
+                          </div>
+                        ) : (
+                          /* Fallback for single service */
+                          ((notification as any).serviceName || (notification as any).staffName || (notification as any).branchName) ? (
                           <div className="mb-2.5 p-2 bg-gradient-to-r from-indigo-50 to-purple-50 rounded-lg border border-indigo-100">
                             <div className="grid grid-cols-1 gap-1.5 text-[10px] sm:text-xs">
                               {(notification as any).serviceName && (
@@ -398,7 +437,8 @@ export default function NotificationPanel({
                               )}
                             </div>
                           </div>
-                        ) : null}
+                          ) : null
+                        )}
 
                         <div className="flex items-center gap-1.5 sm:gap-2 flex-wrap">
                           <span className={`inline-flex items-center gap-1.5 px-2 sm:px-2.5 py-0.5 sm:py-1 ${statusStyle.bg} ${statusStyle.text} rounded-full text-[10px] sm:text-xs font-semibold`}>

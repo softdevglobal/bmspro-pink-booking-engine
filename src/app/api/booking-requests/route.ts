@@ -106,6 +106,10 @@ export async function POST(req: NextRequest) {
         branchName: body.branchName || null,
         bookingDate: body.date || null,
         bookingTime: body.time || null,
+        services: body.services?.map(s => ({
+          name: s.name || "Service",
+          staffName: body.staffName || "Any Available" // Initially single staff or "Any" for request
+        })) || null,
         createdAt: FieldValue.serverTimestamp(),
       };
       

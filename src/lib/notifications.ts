@@ -24,6 +24,7 @@ export interface Notification {
   branchName?: string;
   bookingDate?: string;
   bookingTime?: string;
+  services?: Array<{ name: string; staffName?: string }>;
 }
 
 /**
