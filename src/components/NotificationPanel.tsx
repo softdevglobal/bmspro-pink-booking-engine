@@ -381,7 +381,7 @@ export default function NotificationPanel({
                                     <i className="fas fa-spa text-purple-600 flex-shrink-0 text-[10px]"></i>
                                     <span className="text-gray-800 font-medium truncate text-[11px]">{svc.name}</span>
                                   </div>
-                                  {svc.staffName && svc.staffName !== "Any Available" && svc.staffName !== "Any Staff" && (
+                                  {svc.staffName && (
                                     <div className="flex items-center gap-1.5 ml-4">
                                       <i className="fas fa-user-tie text-indigo-500 flex-shrink-0 text-[9px]"></i>
                                       <span className="text-gray-600 text-[10px]">with {svc.staffName}</span>
