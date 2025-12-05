@@ -142,38 +142,55 @@ export function getNotificationContent(
   staffName?: string,
   serviceName?: string,
   bookingDate?: string,
-  bookingTime?: string
+  bookingTime?: string,
+  services?: Array<{ name: string; staffName?: string }>
 ): { title: string; message: string; type: NotificationType } {
   const code = bookingCode ? ` (${bookingCode})` : "";
-  const service = serviceName ? ` for ${serviceName}` : "";
-  // Don't show staff name in the main message if it's "Multiple Staff" or "Any Available"
-  const showStaff = staffName && staffName !== "Multiple Staff" && staffName !== "Any Available" && staffName !== "Any Staff";
-  const staff = showStaff ? ` with ${staffName}` : "";
   const datetime = bookingDate && bookingTime ? ` on ${bookingDate} at ${bookingTime}` : "";
+  
+  let serviceAndStaff = "";
+  
+  // Check if we have multiple services with specific staff
+  if (services && services.length > 0) {
+    // Format: " for Facial with John, Hair Cut with Jane"
+    const parts = services.map(s => {
+      const sName = s.name || "Service";
+      const stName = s.staffName && s.staffName !== "Any Available" && s.staffName !== "Any Staff" ? ` with ${s.staffName}` : "";
+      return `${sName}${stName}`;
+    });
+    serviceAndStaff = ` for ${parts.join(", ")}`;
+  } else {
+    // Fallback to single service/staff logic
+    const service = serviceName ? ` for ${serviceName}` : "";
+    // Don't show staff name in the main message if it's "Multiple Staff" or "Any Available"
+    const showStaff = staffName && staffName !== "Multiple Staff" && staffName !== "Any Available" && staffName !== "Any Staff";
+    const staff = showStaff ? ` with ${staffName}` : "";
+    serviceAndStaff = `${service}${staff}`;
+  }
   
   switch (status) {
     case "Pending":
       return {
         title: "Booking Request Received",
-        message: `Your booking request${code}${service} has been received successfully! We'll confirm your appointment soon.`,
+        message: `Your booking request${code}${serviceAndStaff} has been received successfully! We'll confirm your appointment soon.`,
         type: "booking_status_changed"
       };
     case "Confirmed":
       return {
         title: "Booking Confirmed",
-        message: `Your booking${code}${service}${staff}${datetime} has been confirmed. We look forward to seeing you!`,
+        message: `Your booking${code}${serviceAndStaff}${datetime} has been confirmed. We look forward to seeing you!`,
         type: "booking_confirmed"
       };
     case "Completed":
       return {
         title: "Booking Completed",
-        message: `Your booking${code}${service}${staff} has been completed. Thank you for visiting us!`,
+        message: `Your booking${code}${serviceAndStaff} has been completed. Thank you for visiting us!`,
         type: "booking_completed"
       };
     case "Canceled":
       return {
         title: "Booking Canceled",
-        message: `Your booking${code}${service}${datetime} has been canceled. Please contact us if you have any questions.`,
+        message: `Your booking${code}${serviceAndStaff}${datetime} has been canceled. Please contact us if you have any questions.`,
         type: "booking_canceled"
       };
     default:

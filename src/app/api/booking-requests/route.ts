@@ -2,6 +2,7 @@ import { NextRequest, NextResponse } from "next/server";
 import { adminDb } from "@/lib/firebaseAdmin";
 import { FieldValue } from "firebase-admin/firestore";
 import { generateBookingCode } from "@/lib/bookings";
+import { getNotificationContent } from "@/lib/notifications";
 
 export const runtime = "nodejs";
 
@@ -103,7 +104,18 @@ export async function POST(req: NextRequest) {
         bookingCode: bookingCode,
         type: "booking_status_changed",
         title: "Booking Request Received",
-        message: `Your booking request (${bookingCode}) for ${body.serviceName || 'service'} has been received successfully! We'll confirm your appointment soon.`,
+        message: getNotificationContent(
+          "Pending",
+          bookingCode,
+          body.staffName || undefined,
+          body.serviceName || undefined,
+          body.date,
+          body.time,
+          body.services?.map(s => ({
+            name: s.name || "Service",
+            staffName: s.staffName || body.staffName || "Any Available"
+          }))
+        ).message,
         status: "Pending",
         read: false,
         ownerUid: String(body.ownerUid),
