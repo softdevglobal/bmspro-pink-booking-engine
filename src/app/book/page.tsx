@@ -32,6 +32,44 @@ function BookPageContent() {
   
   // Notification panel
   const [showNotificationPanel, setShowNotificationPanel] = useState<boolean>(false);
+  const [unreadNotificationCount, setUnreadNotificationCount] = useState<number>(0);
+
+  // Fetch unread notification count
+  useEffect(() => {
+    const fetchUnreadCount = async () => {
+      if (!isAuthenticated || !currentCustomer) return;
+
+      try {
+        const params = new URLSearchParams();
+        if (currentCustomer.uid) {
+          params.set("uid", currentCustomer.uid);
+        } else if (currentCustomer.email) {
+          params.set("email", currentCustomer.email);
+        } else if (currentCustomer.phone) {
+          params.set("phone", currentCustomer.phone);
+        } else {
+          return;
+        }
+        params.set("limit", "50");
+
+        const response = await fetch(`/api/notifications?${params.toString()}`);
+        const data = await response.json();
+
+        if (response.ok && Array.isArray(data.notifications)) {
+          const unreadCount = data.notifications.filter((n: any) => !n.read).length;
+          setUnreadNotificationCount(unreadCount);
+        }
+      } catch (err) {
+        console.error("Error fetching unread count:", err);
+      }
+    };
+
+    fetchUnreadCount();
+    
+    // Refresh count every 30 seconds
+    const interval = setInterval(fetchUnreadCount, 30000);
+    return () => clearInterval(interval);
+  }, [isAuthenticated, currentCustomer]);
 
   // Booking wizard state - 3 steps
   const [bkStep, setBkStep] = useState<1 | 2 | 3>(1);
@@ -826,10 +864,15 @@ function BookPageContent() {
         <div className="absolute top-8 right-6 z-50 flex items-center gap-3">
           <button
             onClick={() => setShowNotificationPanel(true)}
-            className="w-10 h-10 bg-white/10 backdrop-blur-sm border border-white/20 hover:bg-white/20 text-white font-semibold rounded-lg transition-all hover:scale-105 active:scale-95 flex items-center justify-center"
+            className="w-10 h-10 bg-white/10 backdrop-blur-sm border border-white/20 hover:bg-white/20 text-white font-semibold rounded-lg transition-all hover:scale-105 active:scale-95 flex items-center justify-center relative"
             title="Notifications"
           >
             <i className="fas fa-bell"></i>
+            {unreadNotificationCount > 0 && (
+              <span className="absolute -top-1 -right-1 w-5 h-5 bg-red-500 text-white text-xs font-bold rounded-full flex items-center justify-center shadow-lg border-2 border-purple-700 animate-pulse">
+                {unreadNotificationCount > 9 ? '9+' : unreadNotificationCount}
+              </span>
+            )}
           </button>
           <button
             onClick={handleLogoutClick}
@@ -1564,7 +1607,31 @@ function BookPageContent() {
       {/* Notification Panel */}
       <NotificationPanel
         isOpen={showNotificationPanel}
-        onClose={() => setShowNotificationPanel(false)}
+        onClose={() => {
+          setShowNotificationPanel(false);
+          // Refresh unread count when panel closes
+          setTimeout(() => {
+            if (currentCustomer) {
+              const fetchCount = async () => {
+                try {
+                  const params = new URLSearchParams();
+                  if (currentCustomer.uid) params.set("uid", currentCustomer.uid);
+                  else if (currentCustomer.email) params.set("email", currentCustomer.email);
+                  else if (currentCustomer.phone) params.set("phone", currentCustomer.phone);
+                  params.set("limit", "50");
+                  const response = await fetch(`/api/notifications?${params.toString()}`);
+                  const data = await response.json();
+                  if (response.ok && Array.isArray(data.notifications)) {
+                    setUnreadNotificationCount(data.notifications.filter((n: any) => !n.read).length);
+                  }
+                } catch (err) {
+                  console.error("Error refreshing unread count:", err);
+                }
+              };
+              fetchCount();
+            }
+          }, 500);
+        }}
         customerEmail={currentCustomer?.email}
         customerPhone={currentCustomer?.phone}
         customerUid={currentCustomer?.uid}
