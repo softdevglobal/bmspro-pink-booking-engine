@@ -878,32 +878,29 @@ function BookPageContent() {
       <div className="max-w-5xl mx-auto px-3 py-4 sm:p-6 lg:p-8">
         {/* Progress Steps */}
         <div className="bg-white rounded-xl sm:rounded-2xl shadow-xl p-4 sm:p-6 mb-4 sm:mb-6">
-          <div className="flex items-center justify-center max-w-3xl mx-auto">
+          <div className="flex items-center justify-between max-w-3xl mx-auto">
             {[
               { num: 1, label: "Location & Service" },
               { num: 2, label: "Date, Time & Staff" },
               { num: 3, label: "Confirm" }
             ].map((step, i) => (
-              <div key={step.num} className="flex items-center">
-                <div className="flex flex-col items-center gap-1 sm:gap-2 px-2 sm:px-4">
+              <React.Fragment key={step.num}>
+                <div className="flex flex-col items-center gap-1 sm:gap-2 flex-1">
                   <div className={`w-10 h-10 sm:w-12 sm:h-12 rounded-full flex items-center justify-center text-sm sm:text-base font-bold transition-all ${
                     bkStep >= step.num 
                       ? "bg-gradient-to-br from-pink-600 to-purple-600 text-white shadow-lg" 
                       : "bg-gray-200 text-gray-500"
                   }`}>
                     {bkStep > step.num ? <i className="fas fa-check text-xs sm:text-sm" /> : step.num}
+                  </div>
+                  <span className="text-[10px] sm:text-xs text-gray-600 font-semibold text-center leading-tight whitespace-nowrap px-1">{step.label}</span>
                 </div>
-                  <span className="text-[10px] sm:text-xs text-gray-600 font-semibold text-center leading-tight hidden sm:block max-w-[100px]">{step.label}</span>
-                  <span className="text-[9px] sm:hidden text-gray-600 font-semibold text-center leading-tight">
-                    {step.num === 1 ? "Select" : step.num === 2 ? "Schedule" : "Confirm"}
-                  </span>
-              </div>
                 {i < 2 && (
-                  <div className={`h-0.5 sm:h-1 w-8 sm:w-16 md:w-24 rounded transition-all ${
+                  <div className={`h-0.5 sm:h-1 w-12 sm:w-20 md:w-28 -mt-6 sm:-mt-7 rounded transition-all flex-shrink-0 ${
                     bkStep > step.num ? "bg-gradient-to-r from-pink-500 to-purple-500" : "bg-gray-300"
                   }`} />
                 )}
-            </div>
+              </React.Fragment>
             ))}
           </div>
         </div>
