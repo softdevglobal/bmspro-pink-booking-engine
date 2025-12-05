@@ -664,7 +664,17 @@ function BookPageContent() {
             )}
 
             {/* Form */}
-            <div className="space-y-4">
+            <form 
+              onSubmit={(e) => {
+                e.preventDefault();
+                if (authMode === "login") {
+                  handleLogin();
+                } else {
+                  handleRegister();
+                }
+              }}
+              className="space-y-4"
+            >
               {authMode === "register" && (
                 <>
                     <div className="relative">
@@ -707,6 +717,7 @@ function BookPageContent() {
                     onChange={(e) => setAuthEmail(e.target.value)}
                   className="w-full pl-12 pr-4 py-3 bg-gray-50 border-2 border-gray-200 rounded-xl focus:outline-none focus:border-slate-900 focus:bg-white transition-all"
                     disabled={authLoading}
+                    required
                   />
               </div>
 
@@ -721,14 +732,16 @@ function BookPageContent() {
                     onChange={(e) => setAuthPassword(e.target.value)}
                   className="w-full pl-12 pr-12 py-3 bg-gray-50 border-2 border-gray-200 rounded-xl focus:outline-none focus:border-slate-900 focus:bg-white transition-all"
                     disabled={authLoading}
+                    required
                   />
                   <button
                     type="button"
                     onClick={() => setShowPassword(!showPassword)}
-                  className="absolute right-4 top-1/2 -translate-y-1/2 text-gray-400 hover:text-slate-900 transition-colors"
+                  className="absolute right-4 top-1/2 -translate-y-1/2 text-gray-500 hover:text-slate-900 transition-colors z-10"
                     tabIndex={-1}
+                    aria-label={showPassword ? "Hide password" : "Show password"}
                   >
-                  <i className={`fas ${showPassword ? "fa-eye-slash" : "fa-eye"}`}></i>
+                  <i className={`fas ${showPassword ? "fa-eye-slash" : "fa-eye"} text-lg`}></i>
                   </button>
                 </div>
 
@@ -740,7 +753,7 @@ function BookPageContent() {
                 )}
 
               <button
-                onClick={authMode === "login" ? handleLogin : handleRegister}
+                type="submit"
                 disabled={authLoading}
                 className={`w-full py-4 rounded-xl font-bold text-white transition-all transform shadow-lg ${
                   authLoading
@@ -760,7 +773,7 @@ function BookPageContent() {
                 </span>
                 )}
               </button>
-            </div>
+            </form>
           </div>
         </div>
 
@@ -1562,8 +1575,7 @@ function BookPageContent() {
       <link rel="preconnect" href="https://fonts.gstatic.com" crossOrigin="anonymous" />
       <link href="https://fonts.googleapis.com/css2?family=Open+Sans:wght@300;400;500;600;700;800&display=swap" rel="stylesheet" />
       
-      {/* Font Awesome */}
-      <link rel="stylesheet" href="https://cdnjs.cloudflare.com/ajax/libs/font-awesome/6.4.0/css/all.min.css" />
+      {/* Font Awesome loaded in layout.tsx */}
     </div>
   );
 }
