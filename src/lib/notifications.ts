@@ -113,6 +113,20 @@ export async function markNotificationAsRead(notificationId: string): Promise<vo
 }
 
 /**
+ * Delete a notification
+ */
+export async function deleteNotification(notificationId: string): Promise<void> {
+  try {
+    const { deleteDoc } = await import("firebase/firestore");
+    const ref = doc(db, "notifications", notificationId);
+    await deleteDoc(ref);
+  } catch (error) {
+    console.error("Error deleting notification:", error);
+    throw error;
+  }
+}
+
+/**
  * Get notification title and message based on status
  */
 export function getNotificationContent(status: BookingStatus, bookingCode?: string): { title: string; message: string; type: NotificationType } {

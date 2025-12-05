@@ -22,6 +22,9 @@ export default function NotificationPanel({
   const [loading, setLoading] = useState(false);
   const [error, setError] = useState("");
   const [filter, setFilter] = useState<"all" | "unread">("all");
+  const [deleteConfirmOpen, setDeleteConfirmOpen] = useState(false);
+  const [notificationToDelete, setNotificationToDelete] = useState<string | null>(null);
+  const [deleting, setDeleting] = useState(false);
 
   useEffect(() => {
     if (isOpen && (customerEmail || customerPhone || customerUid)) {
@@ -76,6 +79,43 @@ export default function NotificationPanel({
       }
     } catch (err) {
       console.error("Error marking notification as read:", err);
+    }
+  };
+
+  const openDeleteConfirm = (notificationId: string, event: React.MouseEvent) => {
+    event.stopPropagation(); // Prevent marking as read when opening delete dialog
+    setNotificationToDelete(notificationId);
+    setDeleteConfirmOpen(true);
+  };
+
+  const closeDeleteConfirm = () => {
+    setDeleteConfirmOpen(false);
+    setNotificationToDelete(null);
+  };
+
+  const confirmDelete = async () => {
+    if (!notificationToDelete) return;
+
+    setDeleting(true);
+    try {
+      const response = await fetch(`/api/notifications/${notificationToDelete}`, {
+        method: "DELETE",
+      });
+
+      if (response.ok) {
+        setNotifications((prev) =>
+          prev.filter((notif) => notif.id !== notificationToDelete)
+        );
+        closeDeleteConfirm();
+      } else {
+        const data = await response.json();
+        throw new Error(data.error || "Failed to delete notification");
+      }
+    } catch (err: any) {
+      console.error("Error deleting notification:", err);
+      setError(err.message || "Failed to delete notification");
+    } finally {
+      setDeleting(false);
     }
   };
 
@@ -279,7 +319,7 @@ export default function NotificationPanel({
                   <div
                     key={notification.id}
                     onClick={() => !notification.read && markAsRead(notification.id!)}
-                    className={`p-3 sm:p-4 transition-all cursor-pointer hover:bg-white relative ${
+                    className={`p-3 sm:p-4 transition-all cursor-pointer hover:bg-white relative group ${
                       notification.read ? "bg-gray-50/50" : "bg-white"
                     }`}
                   >
@@ -300,9 +340,20 @@ export default function NotificationPanel({
                           <h4 className={`font-semibold text-xs sm:text-sm ${notification.read ? "text-gray-600" : "text-gray-900"} break-words`}>
                             {notification.title}
                           </h4>
-                          {!notification.read && (
-                            <span className="flex-shrink-0 w-2 h-2 bg-indigo-500 rounded-full mt-1.5 animate-pulse"></span>
-                          )}
+                          <div className="flex items-center gap-1.5 flex-shrink-0">
+                            {!notification.read && (
+                              <span className="w-2 h-2 bg-indigo-500 rounded-full animate-pulse"></span>
+                            )}
+                            {/* Delete button - visible on hover on desktop, always visible on mobile */}
+                            <button
+                              onClick={(e) => openDeleteConfirm(notification.id!, e)}
+                              className="sm:opacity-0 sm:group-hover:opacity-100 w-7 h-7 flex items-center justify-center rounded-lg hover:bg-red-50 text-gray-400 hover:text-red-600 transition-all"
+                              aria-label="Delete notification"
+                              title="Delete"
+                            >
+                              <i className="fas fa-trash text-xs"></i>
+                            </button>
+                          </div>
                         </div>
 
                         <p className={`text-xs sm:text-sm mb-2.5 ${notification.read ? "text-gray-500" : "text-gray-700"} break-words`}>
@@ -351,6 +402,68 @@ export default function NotificationPanel({
         )}
       </div>
 
+      {/* Delete Confirmation Modal */}
+      {deleteConfirmOpen && (
+        <div className="fixed inset-0 z-[80] flex items-center justify-center p-4">
+          {/* Backdrop */}
+          <div
+            className="absolute inset-0 bg-black/60 backdrop-blur-sm animate-fade-in"
+            onClick={!deleting ? closeDeleteConfirm : undefined}
+          />
+
+          {/* Modal */}
+          <div className="relative bg-white rounded-2xl shadow-2xl max-w-md w-full animate-scale-in overflow-hidden">
+            {/* Header */}
+            <div className="bg-gradient-to-r from-red-500 to-rose-600 p-5">
+              <div className="flex items-center gap-3">
+                <div className="w-12 h-12 bg-white/20 backdrop-blur-sm rounded-xl flex items-center justify-center">
+                  <i className="fas fa-exclamation-triangle text-white text-xl"></i>
+                </div>
+                <div>
+                  <h3 className="text-lg font-bold text-white">Delete Notification</h3>
+                  <p className="text-white/80 text-sm">This action cannot be undone</p>
+                </div>
+              </div>
+            </div>
+
+            {/* Content */}
+            <div className="p-6">
+              <p className="text-gray-700 text-sm leading-relaxed">
+                Are you sure you want to delete this notification? Once deleted, you won&apos;t be able to view this notification again.
+              </p>
+            </div>
+
+            {/* Footer */}
+            <div className="bg-gray-50 px-6 py-4 flex gap-3 justify-end">
+              <button
+                onClick={closeDeleteConfirm}
+                disabled={deleting}
+                className="px-4 py-2.5 rounded-lg text-gray-700 hover:bg-gray-200 font-medium transition-colors disabled:opacity-50 disabled:cursor-not-allowed text-sm"
+              >
+                Cancel
+              </button>
+              <button
+                onClick={confirmDelete}
+                disabled={deleting}
+                className="px-5 py-2.5 rounded-lg bg-gradient-to-r from-red-500 to-rose-600 hover:from-red-600 hover:to-rose-700 text-white font-semibold transition-all disabled:opacity-50 disabled:cursor-not-allowed flex items-center gap-2 text-sm shadow-lg shadow-red-200"
+              >
+                {deleting ? (
+                  <>
+                    <div className="w-4 h-4 border-2 border-white/30 border-t-white rounded-full animate-spin"></div>
+                    <span>Deleting...</span>
+                  </>
+                ) : (
+                  <>
+                    <i className="fas fa-trash"></i>
+                    <span>Delete</span>
+                  </>
+                )}
+              </button>
+            </div>
+          </div>
+        </div>
+      )}
+
       <style jsx>{`
         @keyframes slide-in {
           from {
@@ -362,8 +475,32 @@ export default function NotificationPanel({
             transform: translateY(0);
           }
         }
+        @keyframes fade-in {
+          from {
+            opacity: 0;
+          }
+          to {
+            opacity: 1;
+          }
+        }
+        @keyframes scale-in {
+          from {
+            opacity: 0;
+            transform: scale(0.95);
+          }
+          to {
+            opacity: 1;
+            transform: scale(1);
+          }
+        }
         .animate-slide-in {
           animation: slide-in 0.2s ease-out;
+        }
+        .animate-fade-in {
+          animation: fade-in 0.2s ease-out;
+        }
+        .animate-scale-in {
+          animation: scale-in 0.2s ease-out;
         }
       `}</style>
     </>
