@@ -349,9 +349,9 @@ export default function NotificationPanel({
                             {notification.title}
                           </h4>
                           <div className="flex items-center gap-1.5 flex-shrink-0">
-                          {!notification.read && (
+                            {!notification.read && (
                               <span className="w-2 h-2 bg-indigo-500 rounded-full animate-pulse"></span>
-                          )}
+                            )}
                             {/* Delete button - visible on hover on desktop, always visible on mobile */}
                             <button
                               onClick={(e) => openDeleteConfirm(notification.id!, e)}
@@ -367,6 +367,38 @@ export default function NotificationPanel({
                         <p className={`text-xs sm:text-sm mb-2.5 ${notification.read ? "text-gray-500" : "text-gray-700"} break-words`}>
                           {notification.message}
                         </p>
+
+                        {/* Booking Details Section */}
+                        {(notification as any).serviceName || (notification as any).staffName || (notification as any).branchName ? (
+                          <div className="mb-2.5 p-2 bg-gradient-to-r from-indigo-50 to-purple-50 rounded-lg border border-indigo-100">
+                            <div className="grid grid-cols-1 gap-1.5 text-[10px] sm:text-xs">
+                              {(notification as any).serviceName && (
+                                <div className="flex items-center gap-1.5">
+                                  <i className="fas fa-spa text-purple-600 flex-shrink-0"></i>
+                                  <span className="text-gray-700 font-medium truncate">{(notification as any).serviceName}</span>
+                                </div>
+                              )}
+                              {(notification as any).staffName && (
+                                <div className="flex items-center gap-1.5">
+                                  <i className="fas fa-user-tie text-indigo-600 flex-shrink-0"></i>
+                                  <span className="text-gray-700 font-medium truncate">with {(notification as any).staffName}</span>
+                                </div>
+                              )}
+                              {(notification as any).branchName && (
+                                <div className="flex items-center gap-1.5">
+                                  <i className="fas fa-map-marker-alt text-pink-600 flex-shrink-0"></i>
+                                  <span className="text-gray-700 font-medium truncate">{(notification as any).branchName}</span>
+                                </div>
+                              )}
+                              {(notification as any).bookingDate && (notification as any).bookingTime && (
+                                <div className="flex items-center gap-1.5">
+                                  <i className="far fa-calendar text-blue-600 flex-shrink-0"></i>
+                                  <span className="text-gray-700 font-medium">{(notification as any).bookingDate} at {(notification as any).bookingTime}</span>
+                                </div>
+                              )}
+                            </div>
+                          </div>
+                        ) : null}
 
                         <div className="flex items-center gap-1.5 sm:gap-2 flex-wrap">
                           <span className={`inline-flex items-center gap-1.5 px-2 sm:px-2.5 py-0.5 sm:py-1 ${statusStyle.bg} ${statusStyle.text} rounded-full text-[10px] sm:text-xs font-semibold`}>

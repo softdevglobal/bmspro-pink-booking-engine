@@ -18,6 +18,12 @@ export interface Notification {
   read: boolean;
   createdAt: any;
   ownerUid: string; // Salon owner UID
+  // Additional booking details for richer notifications
+  staffName?: string;
+  serviceName?: string;
+  branchName?: string;
+  bookingDate?: string;
+  bookingTime?: string;
 }
 
 /**
@@ -129,32 +135,42 @@ export async function deleteNotification(notificationId: string): Promise<void> 
 /**
  * Get notification title and message based on status
  */
-export function getNotificationContent(status: BookingStatus, bookingCode?: string): { title: string; message: string; type: NotificationType } {
+export function getNotificationContent(
+  status: BookingStatus, 
+  bookingCode?: string,
+  staffName?: string,
+  serviceName?: string,
+  bookingDate?: string,
+  bookingTime?: string
+): { title: string; message: string; type: NotificationType } {
   const code = bookingCode ? ` (${bookingCode})` : "";
+  const service = serviceName ? ` for ${serviceName}` : "";
+  const staff = staffName ? ` with ${staffName}` : "";
+  const datetime = bookingDate && bookingTime ? ` on ${bookingDate} at ${bookingTime}` : "";
   
   switch (status) {
     case "Pending":
       return {
         title: "Booking Request Received",
-        message: `Your booking request${code} has been received successfully! We'll confirm your appointment soon.`,
+        message: `Your booking request${code}${service} has been received successfully! We'll confirm your appointment soon.`,
         type: "booking_status_changed"
       };
     case "Confirmed":
       return {
         title: "Booking Confirmed",
-        message: `Your booking${code} has been confirmed. We look forward to seeing you!`,
+        message: `Your booking${code}${service}${staff}${datetime} has been confirmed. We look forward to seeing you!`,
         type: "booking_confirmed"
       };
     case "Completed":
       return {
         title: "Booking Completed",
-        message: `Your booking${code} has been completed. Thank you for visiting us!`,
+        message: `Your booking${code}${service}${staff} has been completed. Thank you for visiting us!`,
         type: "booking_completed"
       };
     case "Canceled":
       return {
         title: "Booking Canceled",
-        message: `Your booking${code} has been canceled. Please contact us if you have any questions.`,
+        message: `Your booking${code}${service}${datetime} has been canceled. Please contact us if you have any questions.`,
         type: "booking_canceled"
       };
     default:

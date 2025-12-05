@@ -96,10 +96,16 @@ export async function POST(req: NextRequest) {
         bookingCode: bookingCode,
         type: "booking_status_changed",
         title: "Booking Request Received",
-        message: `Your booking request (${bookingCode}) has been received successfully! We'll confirm your appointment soon.`,
+        message: `Your booking request (${bookingCode}) for ${body.serviceName || 'service'} has been received successfully! We'll confirm your appointment soon.`,
         status: "Pending",
         read: false,
         ownerUid: String(body.ownerUid),
+        // Additional details for better notification display
+        staffName: body.staffName || null,
+        serviceName: body.serviceName || null,
+        branchName: body.branchName || null,
+        bookingDate: body.date || null,
+        bookingTime: body.time || null,
         createdAt: FieldValue.serverTimestamp(),
       };
       
