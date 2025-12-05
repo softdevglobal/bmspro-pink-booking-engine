@@ -121,6 +121,14 @@ export default function NotificationPanel({
 
   const getStatusStyle = (status: string) => {
     switch (status) {
+      case "Pending":
+        return {
+          bg: "bg-amber-50",
+          text: "text-amber-700",
+          badge: "bg-amber-500",
+          icon: "fa-clock",
+          iconColor: "text-amber-500"
+        };
       case "Confirmed":
         return {
           bg: "bg-emerald-50",

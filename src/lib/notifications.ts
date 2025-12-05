@@ -133,6 +133,12 @@ export function getNotificationContent(status: BookingStatus, bookingCode?: stri
   const code = bookingCode ? ` (${bookingCode})` : "";
   
   switch (status) {
+    case "Pending":
+      return {
+        title: "Booking Request Received",
+        message: `Your booking request${code} has been received successfully! We'll confirm your appointment soon.`,
+        type: "booking_status_changed"
+      };
     case "Confirmed":
       return {
         title: "Booking Confirmed",

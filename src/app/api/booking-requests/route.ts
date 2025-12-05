@@ -86,6 +86,29 @@ export async function POST(req: NextRequest) {
     const db = adminDb();
     const ref = await db.collection("bookings").add(payload);
     
+    // Create notification for the customer
+    try {
+      const notificationPayload = {
+        customerUid: body.customerUid || null,
+        customerEmail: body.clientEmail || null,
+        customerPhone: body.clientPhone || null,
+        bookingId: ref.id,
+        bookingCode: bookingCode,
+        type: "booking_status_changed",
+        title: "Booking Request Received",
+        message: `Your booking request (${bookingCode}) has been received successfully! We'll confirm your appointment soon.`,
+        status: "Pending",
+        read: false,
+        ownerUid: String(body.ownerUid),
+        createdAt: FieldValue.serverTimestamp(),
+      };
+      
+      await db.collection("notifications").add(notificationPayload);
+    } catch (notifError) {
+      // Log error but don't fail the booking creation
+      console.error("Error creating notification:", notifError);
+    }
+    
     return NextResponse.json({ id: ref.id, bookingCode: bookingCode });
   } catch (e: any) {
     console.error("Create booking request API error:", e);
