@@ -948,9 +948,9 @@ function BookPageContent() {
                       : "bg-gray-200 text-gray-500"
                   }`}>
                     {bkStep > step.num ? <i className="fas fa-check text-xs sm:text-sm" /> : step.num}
-                  </div>
-                  <span className="text-[10px] sm:text-xs text-gray-600 font-semibold text-center leading-tight whitespace-nowrap px-1">{step.label}</span>
                 </div>
+                  <span className="text-[10px] sm:text-xs text-gray-600 font-semibold text-center leading-tight whitespace-nowrap px-1">{step.label}</span>
+              </div>
                 {i < 2 && (
                   <div className={`h-0.5 sm:h-1 w-12 sm:w-20 md:w-28 -mt-6 sm:-mt-7 rounded transition-all flex-shrink-0 ${
                     bkStep > step.num ? "bg-gradient-to-r from-pink-500 to-purple-500" : "bg-gray-300"

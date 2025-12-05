@@ -146,7 +146,9 @@ export function getNotificationContent(
 ): { title: string; message: string; type: NotificationType } {
   const code = bookingCode ? ` (${bookingCode})` : "";
   const service = serviceName ? ` for ${serviceName}` : "";
-  const staff = staffName ? ` with ${staffName}` : "";
+  // Don't show staff name in the main message if it's "Multiple Staff" or "Any Available"
+  const showStaff = staffName && staffName !== "Multiple Staff" && staffName !== "Any Available" && staffName !== "Any Staff";
+  const staff = showStaff ? ` with ${staffName}` : "";
   const datetime = bookingDate && bookingTime ? ` on ${bookingDate} at ${bookingTime}` : "";
   
   switch (status) {
