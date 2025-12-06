@@ -721,10 +721,10 @@ function BookPageContent() {
                 </div>
                       <input
                         type="text"
-                  placeholder="Full Name"
+                        placeholder="Full Name"
                         value={authFullName}
                         onChange={(e) => setAuthFullName(e.target.value)}
-                  className="w-full pl-12 pr-4 py-3 bg-gray-50 border-2 border-gray-200 rounded-xl focus:outline-none focus:border-slate-900 focus:bg-white transition-all"
+                        className="w-full pl-12 pr-4 py-3 bg-gray-50 border-2 border-gray-200 rounded-xl focus:outline-none focus:border-slate-900 focus:bg-white transition-all text-slate-900"
                         disabled={authLoading}
                       />
                     </div>
@@ -734,10 +734,10 @@ function BookPageContent() {
                 </div>
                       <input
                         type="tel"
-                  placeholder="Phone Number"
+                        placeholder="Phone Number"
                         value={authPhone}
                         onChange={(e) => setAuthPhone(e.target.value)}
-                  className="w-full pl-12 pr-4 py-3 bg-gray-50 border-2 border-gray-200 rounded-xl focus:outline-none focus:border-slate-900 focus:bg-white transition-all"
+                        className="w-full pl-12 pr-4 py-3 bg-gray-50 border-2 border-gray-200 rounded-xl focus:outline-none focus:border-slate-900 focus:bg-white transition-all text-slate-900"
                         disabled={authLoading}
                       />
                   </div>
@@ -750,10 +750,10 @@ function BookPageContent() {
                 </div>
                   <input
                     type="email"
-                  placeholder="Email Address"
+                    placeholder="Email Address"
                     value={authEmail}
                     onChange={(e) => setAuthEmail(e.target.value)}
-                  className="w-full pl-12 pr-4 py-3 bg-gray-50 border-2 border-gray-200 rounded-xl focus:outline-none focus:border-slate-900 focus:bg-white transition-all"
+                    className="w-full pl-12 pr-4 py-3 bg-gray-50 border-2 border-gray-200 rounded-xl focus:outline-none focus:border-slate-900 focus:bg-white transition-all text-slate-900"
                     disabled={authLoading}
                     required
                   />
@@ -765,10 +765,10 @@ function BookPageContent() {
                 </div>
                   <input
                     type={showPassword ? "text" : "password"}
-                  placeholder="Password"
+                    placeholder="Password"
                     value={authPassword}
                     onChange={(e) => setAuthPassword(e.target.value)}
-                  className="w-full pl-12 pr-12 py-3 bg-gray-50 border-2 border-gray-200 rounded-xl focus:outline-none focus:border-slate-900 focus:bg-white transition-all"
+                    className="w-full pl-12 pr-12 py-3 bg-gray-50 border-2 border-gray-200 rounded-xl focus:outline-none focus:border-slate-900 focus:bg-white transition-all text-slate-900"
                     disabled={authLoading}
                     required
                   />
@@ -1344,7 +1344,7 @@ function BookPageContent() {
                         value={currentCustomer?.fullName || ""}
                         onChange={(e) => setCurrentCustomer({ ...currentCustomer, fullName: e.target.value })}
                         placeholder="Enter your full name"
-                        className="w-full px-4 py-3 bg-white border-2 border-gray-300 rounded-lg focus:ring-2 focus:ring-pink-500 focus:border-transparent text-sm sm:text-base"
+                        className="w-full px-4 py-3 bg-white border-2 border-gray-300 rounded-lg focus:ring-2 focus:ring-pink-500 focus:border-transparent text-sm sm:text-base text-gray-900"
                       />
                     </div>
 
@@ -1359,7 +1359,7 @@ function BookPageContent() {
                         value={currentCustomer?.email || ""}
                         onChange={(e) => setCurrentCustomer({ ...currentCustomer, email: e.target.value })}
                         placeholder="Enter your email"
-                        className="w-full px-4 py-3 bg-white border-2 border-gray-300 rounded-lg focus:ring-2 focus:ring-pink-500 focus:border-transparent text-sm sm:text-base"
+                        className="w-full px-4 py-3 bg-white border-2 border-gray-300 rounded-lg focus:ring-2 focus:ring-pink-500 focus:border-transparent text-sm sm:text-base text-gray-900"
                       />
                     </div>
 
@@ -1374,7 +1374,7 @@ function BookPageContent() {
                         value={currentCustomer?.phone || ""}
                         onChange={(e) => setCurrentCustomer({ ...currentCustomer, phone: e.target.value })}
                         placeholder="Enter your phone number"
-                        className="w-full px-4 py-3 bg-white border-2 border-gray-300 rounded-lg focus:ring-2 focus:ring-pink-500 focus:border-transparent text-sm sm:text-base"
+                        className="w-full px-4 py-3 bg-white border-2 border-gray-300 rounded-lg focus:ring-2 focus:ring-pink-500 focus:border-transparent text-sm sm:text-base text-gray-900"
                       />
                     </div>
 
@@ -1389,7 +1389,7 @@ function BookPageContent() {
                         onChange={(e) => setBkNotes(e.target.value)}
                         placeholder="Any special requests or notes..."
                         rows={3}
-                        className="w-full px-4 py-3 bg-white border-2 border-gray-300 rounded-lg focus:ring-2 focus:ring-pink-500 focus:border-transparent text-sm sm:text-base resize-none"
+                        className="w-full px-4 py-3 bg-white border-2 border-gray-300 rounded-lg focus:ring-2 focus:ring-pink-500 focus:border-transparent text-sm sm:text-base resize-none text-gray-900"
                       ></textarea>
                     </div>
                   </div>
