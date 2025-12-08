@@ -74,8 +74,7 @@ export async function POST(req: NextRequest) {
       notes: body.notes || null,
       serviceId: typeof body.serviceId === "number" ? body.serviceId : String(body.serviceId),
       serviceName: body.serviceName || null,
-      staffId: body.staffId || null,
-      staffName: body.staffName || null,
+      // Removed top-level staff assignment to rely on service-wise staff selection
       branchId: String(body.branchId),
       branchName: body.branchName || null,
       date: String(body.date),
@@ -113,7 +112,7 @@ export async function POST(req: NextRequest) {
           body.time,
           body.services?.map(s => ({
             name: s.name || "Service",
-            staffName: s.staffName || body.staffName || "Any Available"
+            staffName: s.staffName || "Any Available"
           }))
         ).message,
         status: "Pending",
@@ -127,7 +126,7 @@ export async function POST(req: NextRequest) {
         bookingTime: body.time || null,
         services: body.services?.map(s => ({
           name: s.name || "Service",
-          staffName: s.staffName || body.staffName || "Any Available"
+          staffName: s.staffName || "Any Available"
         })) || null,
         createdAt: FieldValue.serverTimestamp(),
       };
