@@ -1527,7 +1527,25 @@ function BookPageContent() {
       {/* Success Modal */}
       {showSuccess && (
         <div className="fixed inset-0 bg-black/50 backdrop-blur-sm flex items-center justify-center z-[100] p-4">
-          <div className="bg-white rounded-2xl shadow-2xl max-w-lg w-full p-8">
+          <div className="bg-white rounded-2xl shadow-2xl max-w-lg w-full p-8 relative">
+            {/* Close Button */}
+            <button
+              onClick={() => {
+                setShowSuccess(false);
+                setBkStep(1);
+                setBkBranchId(null);
+                setBkSelectedServices([]);
+                setBkServiceTimes({});
+                setBkServiceStaff({});
+                setBkDate(null);
+                setBkNotes("");
+              }}
+              className="absolute top-4 right-4 w-10 h-10 flex items-center justify-center rounded-full hover:bg-gray-100 transition-colors"
+              aria-label="Close"
+            >
+              <i className="fas fa-times text-xl text-gray-500 hover:text-gray-700"></i>
+            </button>
+            
             <div className="text-center">
               <div className="inline-flex items-center justify-center w-20 h-20 bg-green-100 rounded-full mb-6">
                 <i className="fas fa-check-circle text-4xl text-green-600"></i>
