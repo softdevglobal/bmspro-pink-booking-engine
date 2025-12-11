@@ -25,6 +25,11 @@ export async function GET(req: NextRequest) {
 
     return NextResponse.json({ 
       salonName,
+      address: data?.locationText || data?.address || "",
+      phone: data?.contactPhone || data?.phone || "",
+      abn: data?.abn || "",
+      logoUrl: data?.logoUrl || "",
+      termsAndConditions: data?.termsAndConditions || "",
     });
   } catch (error: any) {
     console.error("Error fetching owner:", error);

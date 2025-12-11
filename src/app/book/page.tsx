@@ -87,8 +87,18 @@ function BookPageContent() {
   const [showSuccess, setShowSuccess] = useState<boolean>(false);
   const [bookingCode, setBookingCode] = useState<string>("");
 
+  // Terms and conditions
+  const [agreedToTerms, setAgreedToTerms] = useState<boolean>(false);
+  const [termsAndConditions, setTermsAndConditions] = useState<string>("");
+  const [showTermsModal, setShowTermsModal] = useState<boolean>(false);
+  const [hasScrolledToBottom, setHasScrolledToBottom] = useState<boolean>(false);
+
   // Real data from Firestore
   const [salonName, setSalonName] = useState<string>("Salon");
+  const [salonAddress, setSalonAddress] = useState<string>("");
+  const [salonPhone, setSalonPhone] = useState<string>("");
+  const [salonAbn, setSalonAbn] = useState<string>("");
+  const [salonLogo, setSalonLogo] = useState<string>("");
   const [branches, setBranches] = useState<Array<{ id: string; name: string; address?: string }>>([]);
   const [servicesList, setServicesList] = useState<Array<{ id: string | number; name: string; price?: number; duration?: number; icon?: string; branches?: string[]; staffIds?: string[] }>>([]);
   const [staffList, setStaffList] = useState<Array<{ id: string; name: string; role?: string; status?: string; avatar?: string; branchId?: string; branch?: string }>>([]);
@@ -196,6 +206,11 @@ function BookPageContent() {
         if (ownerRes.ok) {
           const ownerData = await ownerRes.json();
           setSalonName(ownerData.salonName || "Salon");
+          setSalonAddress(ownerData.address || "");
+          setSalonPhone(ownerData.phone || "");
+          setSalonAbn(ownerData.abn || "");
+          setSalonLogo(ownerData.logoUrl || "");
+          setTermsAndConditions(ownerData.termsAndConditions || "");
         }
 
         // Load branches via API
@@ -861,25 +876,25 @@ function BookPageContent() {
       {/* Header */}
       <div className="relative overflow-hidden bg-indigo-900">
         {/* Notification and Logout Buttons */}
-        <div className="absolute top-8 right-6 z-50 flex items-center gap-3">
+        <div className="absolute top-4 sm:top-8 right-4 sm:right-6 z-50 flex items-center gap-2 sm:gap-3">
           <button
             onClick={() => setShowNotificationPanel(true)}
-            className="w-10 h-10 bg-white/10 backdrop-blur-sm border border-white/20 hover:bg-white/20 text-white font-semibold rounded-lg transition-all hover:scale-105 active:scale-95 flex items-center justify-center relative"
+            className="w-9 h-9 sm:w-10 sm:h-10 bg-white/10 backdrop-blur-sm border border-white/20 hover:bg-white/20 text-white font-semibold rounded-lg transition-all hover:scale-105 active:scale-95 flex items-center justify-center relative"
             title="Notifications"
           >
-            <i className="fas fa-bell"></i>
+            <i className="fas fa-bell text-sm sm:text-base"></i>
             {unreadNotificationCount > 0 && (
-              <span className="absolute -top-1 -right-1 w-5 h-5 bg-red-500 text-white text-xs font-bold rounded-full flex items-center justify-center shadow-lg border-2 border-purple-700 animate-pulse">
+              <span className="absolute -top-1 -right-1 w-4 h-4 sm:w-5 sm:h-5 bg-red-500 text-white text-[10px] sm:text-xs font-bold rounded-full flex items-center justify-center shadow-lg border-2 border-purple-700 animate-pulse">
                 {unreadNotificationCount > 9 ? '9+' : unreadNotificationCount}
               </span>
             )}
           </button>
           <button
             onClick={handleLogoutClick}
-            className="w-10 h-10 bg-white/10 backdrop-blur-sm border border-white/20 hover:bg-white/20 text-white font-semibold rounded-lg transition-all hover:scale-105 active:scale-95 flex items-center justify-center"
+            className="w-9 h-9 sm:w-10 sm:h-10 bg-white/10 backdrop-blur-sm border border-white/20 hover:bg-white/20 text-white font-semibold rounded-lg transition-all hover:scale-105 active:scale-95 flex items-center justify-center"
             title="Logout"
           >
-            <i className="fas fa-sign-out-alt"></i>
+            <i className="fas fa-sign-out-alt text-sm sm:text-base"></i>
           </button>
         </div>
 
@@ -921,14 +936,104 @@ function BookPageContent() {
         </div>
 
         {/* Header Content */}
-        <div className="relative z-10 px-6 py-12 text-center">
-          <div className="inline-block px-6 py-2 bg-white/10 backdrop-blur-sm rounded-full text-white text-sm font-medium mb-4">
-            WELCOME TO
+        <div className="relative z-10 px-4 sm:px-6 py-6 sm:py-10">
+          <div className="max-w-5xl mx-auto">
+            {/* Mobile Layout */}
+            <div className="block sm:hidden text-center pt-10">
+              {/* Logo - Mobile */}
+              {salonLogo ? (
+                <div className="w-16 h-16 mx-auto rounded-xl bg-white p-1.5 shadow-lg mb-3">
+                  <img src={salonLogo} alt={salonName} className="w-full h-full object-contain" />
                 </div>
-          <h1 className="text-5xl font-bold text-white mb-2">{salonName}</h1>
-          <p className="text-white/80">BOOK YOUR APPOINTMENT</p>
+              ) : (
+                <div className="w-16 h-16 mx-auto rounded-xl bg-white/20 backdrop-blur-sm flex items-center justify-center mb-3">
+                  <i className="fas fa-spa text-2xl text-white/80"></i>
                 </div>
+              )}
+              <div className="inline-block px-3 py-1 bg-white/10 backdrop-blur-sm rounded-full text-white/90 text-[10px] font-medium mb-1">
+                WELCOME TO
+              </div>
+              <h1 className="text-2xl font-bold text-white">{salonName}</h1>
+              <p className="text-white/70 text-xs mt-0.5">BOOK YOUR APPOINTMENT</p>
+              
+              {/* Contact Info - Mobile */}
+              {(salonAddress || salonPhone || salonAbn) && (
+                <div className="flex flex-col items-center gap-1.5 mt-3 pt-3 border-t border-white/20">
+                  {salonAddress && (
+                    <div className="flex items-center gap-1.5 text-white/80 text-[10px] bg-white/10 px-2.5 py-1 rounded-full">
+                      <i className="fas fa-map-marker-alt text-pink-300 text-[9px]"></i>
+                      <span>{salonAddress}</span>
+                    </div>
+                  )}
+                  <div className="flex items-center gap-2">
+                    {salonPhone && (
+                      <div className="flex items-center gap-1.5 text-white/80 text-[10px] bg-white/10 px-2.5 py-1 rounded-full">
+                        <i className="fas fa-phone text-pink-300 text-[9px]"></i>
+                        <span>{salonPhone}</span>
+                      </div>
+                    )}
+                    {salonAbn && (
+                      <div className="flex items-center gap-1.5 text-white/80 text-[10px] bg-white/10 px-2.5 py-1 rounded-full">
+                        <i className="fas fa-building text-pink-300 text-[9px]"></i>
+                        <span>ABN: {salonAbn}</span>
+                      </div>
+                    )}
+                  </div>
                 </div>
+              )}
+            </div>
+
+            {/* Desktop Layout */}
+            <div className="hidden sm:flex flex-col items-center text-center">
+              <div className="flex items-start gap-5">
+                {/* Logo - Desktop */}
+                {salonLogo ? (
+                  <div className="w-20 h-20 lg:w-24 lg:h-24 rounded-2xl bg-white p-2 shadow-lg flex-shrink-0">
+                    <img src={salonLogo} alt={salonName} className="w-full h-full object-contain" />
+                  </div>
+                ) : (
+                  <div className="w-20 h-20 lg:w-24 lg:h-24 rounded-2xl bg-white/20 backdrop-blur-sm flex items-center justify-center flex-shrink-0">
+                    <i className="fas fa-spa text-3xl lg:text-4xl text-white/80"></i>
+                  </div>
+                )}
+                
+                {/* Salon Name & Welcome - Desktop */}
+                <div className="text-left pt-0">
+                  <div className="inline-block px-4 py-1.5 bg-white/10 backdrop-blur-sm rounded-full text-white/90 text-sm font-medium mb-1">
+                    WELCOME TO
+                  </div>
+                  <h1 className="text-3xl lg:text-4xl xl:text-5xl font-bold text-white">{salonName}</h1>
+                  <p className="text-white/70 text-sm lg:text-base mt-0.5">BOOK YOUR APPOINTMENT</p>
+                </div>
+              </div>
+              
+              {/* Contact Info - Desktop (below, centered) */}
+              {(salonAddress || salonPhone || salonAbn) && (
+                <div className="flex flex-wrap items-center justify-center gap-3 mt-4 pt-4 border-t border-white/20 w-full">
+                  {salonAddress && (
+                    <div className="flex items-center gap-2 text-white/80 text-sm bg-white/10 px-3 py-1.5 rounded-full">
+                      <i className="fas fa-map-marker-alt text-pink-300"></i>
+                      <span>{salonAddress}</span>
+                    </div>
+                  )}
+                  {salonPhone && (
+                    <div className="flex items-center gap-2 text-white/80 text-sm bg-white/10 px-3 py-1.5 rounded-full">
+                      <i className="fas fa-phone text-pink-300"></i>
+                      <span>{salonPhone}</span>
+                    </div>
+                  )}
+                  {salonAbn && (
+                    <div className="flex items-center gap-2 text-white/80 text-sm bg-white/10 px-3 py-1.5 rounded-full">
+                      <i className="fas fa-building text-pink-300"></i>
+                      <span>ABN: {salonAbn}</span>
+                    </div>
+                  )}
+                </div>
+              )}
+            </div>
+          </div>
+        </div>
+      </div>
 
       {/* Main Content */}
       <div className="max-w-5xl mx-auto px-3 py-4 sm:p-6 lg:p-8">
@@ -1488,6 +1593,49 @@ function BookPageContent() {
                 </div>
               </div>
 
+              {/* Terms and Conditions */}
+              {termsAndConditions && (
+                <div className="bg-purple-50 rounded-xl p-4 border-2 border-purple-200">
+                  <div className="flex items-start gap-3">
+                    <div 
+                      onClick={() => !agreedToTerms && setShowTermsModal(true)}
+                      className={`w-5 h-5 mt-0.5 rounded border-2 flex items-center justify-center flex-shrink-0 transition-all ${
+                        agreedToTerms 
+                          ? "bg-purple-600 border-purple-600" 
+                          : "border-purple-400 bg-white cursor-pointer hover:border-purple-500"
+                      }`}
+                    >
+                      {agreedToTerms && <i className="fas fa-check text-white text-xs"></i>}
+                    </div>
+                    <div className="text-sm text-gray-700">
+                      I have read and agree to the{" "}
+                      <button
+                        type="button"
+                        onClick={() => setShowTermsModal(true)}
+                        className="text-purple-600 font-semibold underline hover:text-purple-800"
+                      >
+                        Terms and Conditions
+                      </button>
+                    </div>
+                  </div>
+                </div>
+              )}
+
+              {/* Validation Messages */}
+              {(!currentCustomer?.fullName || !currentCustomer?.email || !currentCustomer?.phone) && (
+                <div className="bg-amber-50 border border-amber-200 rounded-lg p-3 flex items-center gap-2">
+                  <i className="fas fa-exclamation-triangle text-amber-500"></i>
+                  <span className="text-sm text-amber-700">Please fill in all required customer details (Name, Email, Phone)</span>
+                </div>
+              )}
+
+              {termsAndConditions && !agreedToTerms && currentCustomer?.fullName && currentCustomer?.email && currentCustomer?.phone && (
+                <div className="bg-amber-50 border border-amber-200 rounded-lg p-3 flex items-center gap-2">
+                  <i className="fas fa-exclamation-triangle text-amber-500"></i>
+                  <span className="text-sm text-amber-700">Please agree to the Terms and Conditions to proceed</span>
+                </div>
+              )}
+
               {/* Navigation Buttons */}
               <div className="flex justify-between items-center gap-3 pt-6 sm:pt-8 mt-6 sm:mt-8 border-t-2 border-gray-100">
                 <button
@@ -1499,9 +1647,19 @@ function BookPageContent() {
                 </button>
                 <button
                   onClick={handleConfirmBooking}
-                  disabled={submittingBooking}
+                  disabled={
+                    submittingBooking || 
+                    !currentCustomer?.fullName || 
+                    !currentCustomer?.email || 
+                    !currentCustomer?.phone ||
+                    (termsAndConditions && !agreedToTerms)
+                  }
                   className={`px-6 sm:px-8 py-3 sm:py-4 rounded-lg font-bold text-sm sm:text-base text-white transition-all ${
-                    submittingBooking
+                    submittingBooking || 
+                    !currentCustomer?.fullName || 
+                    !currentCustomer?.email || 
+                    !currentCustomer?.phone ||
+                    (termsAndConditions && !agreedToTerms)
                       ? "bg-gray-400 cursor-not-allowed"
                       : "bg-gradient-to-r from-pink-600 to-purple-600 hover:shadow-2xl hover:scale-105"
                   }`}
@@ -1518,6 +1676,74 @@ function BookPageContent() {
                     </>
                   )}
                 </button>
+              </div>
+            </div>
+          )}
+
+          {/* Terms and Conditions Modal */}
+          {showTermsModal && (
+            <div className="fixed inset-0 bg-black/50 backdrop-blur-sm flex items-center justify-center z-[100] p-4">
+              <div className="bg-white rounded-xl shadow-2xl max-w-lg w-full max-h-[75vh] flex flex-col">
+                <div className="px-4 py-3 border-b border-gray-200 flex items-center justify-between">
+                  <h3 className="text-sm font-bold text-gray-800 flex items-center gap-2">
+                    <i className="fas fa-file-contract text-purple-600 text-xs"></i>
+                    Terms and Conditions
+                  </h3>
+                  <button
+                    onClick={() => {
+                      setShowTermsModal(false);
+                      setHasScrolledToBottom(false);
+                    }}
+                    className="w-7 h-7 flex items-center justify-center rounded-full hover:bg-gray-100 transition-colors"
+                  >
+                    <i className="fas fa-times text-sm text-gray-500"></i>
+                  </button>
+                </div>
+                <div 
+                  className="px-4 py-3 overflow-y-auto flex-1"
+                  onScroll={(e) => {
+                    const target = e.target as HTMLDivElement;
+                    const isAtBottom = target.scrollHeight - target.scrollTop <= target.clientHeight + 20;
+                    if (isAtBottom && !hasScrolledToBottom) {
+                      setHasScrolledToBottom(true);
+                    }
+                  }}
+                >
+                  <div className="text-xs text-gray-600 whitespace-pre-wrap leading-relaxed">
+                    {termsAndConditions}
+                  </div>
+                </div>
+                <div className="px-4 py-3 border-t border-gray-200">
+                  {!hasScrolledToBottom ? (
+                    <div className="flex items-center justify-center gap-2 text-xs text-gray-500">
+                      <i className="fas fa-arrow-down animate-bounce"></i>
+                      <span>Please scroll down to read all terms</span>
+                    </div>
+                  ) : (
+                    <div className="flex justify-end gap-2">
+                      <button
+                        onClick={() => {
+                          setShowTermsModal(false);
+                          setHasScrolledToBottom(false);
+                        }}
+                        className="px-4 py-2 text-xs border border-gray-300 text-gray-600 font-medium rounded-lg hover:bg-gray-50 transition-all"
+                      >
+                        Close
+                      </button>
+                      <button
+                        onClick={() => {
+                          setAgreedToTerms(true);
+                          setShowTermsModal(false);
+                          setHasScrolledToBottom(false);
+                        }}
+                        className="px-4 py-2 text-xs bg-gradient-to-r from-pink-600 to-purple-600 text-white font-medium rounded-lg hover:shadow-lg transition-all"
+                      >
+                        <i className="fas fa-check mr-1.5"></i>
+                        I Agree
+                      </button>
+                    </div>
+                  )}
+                </div>
               </div>
             </div>
           )}
@@ -1539,6 +1765,7 @@ function BookPageContent() {
                 setBkServiceStaff({});
                 setBkDate(null);
                 setBkNotes("");
+                setAgreedToTerms(false);
               }}
               className="absolute top-4 right-4 w-10 h-10 flex items-center justify-center rounded-full hover:bg-gray-100 transition-colors"
               aria-label="Close"
@@ -1612,6 +1839,7 @@ function BookPageContent() {
                   setBkServiceStaff({});
                   setBkDate(null);
                   setBkNotes("");
+                  setAgreedToTerms(false);
                 }}
                 className="w-full px-6 py-3 bg-gradient-to-r from-pink-600 to-purple-600 text-white font-semibold rounded-lg hover:shadow-lg transition-all"
               >
