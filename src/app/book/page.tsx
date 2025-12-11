@@ -1652,14 +1652,14 @@ function BookPageContent() {
                     !currentCustomer?.fullName || 
                     !currentCustomer?.email || 
                     !currentCustomer?.phone ||
-                    (termsAndConditions && !agreedToTerms)
+                    (!!termsAndConditions && !agreedToTerms)
                   }
                   className={`px-6 sm:px-8 py-3 sm:py-4 rounded-lg font-bold text-sm sm:text-base text-white transition-all ${
                     submittingBooking || 
                     !currentCustomer?.fullName || 
                     !currentCustomer?.email || 
                     !currentCustomer?.phone ||
-                    (termsAndConditions && !agreedToTerms)
+                    (!!termsAndConditions && !agreedToTerms)
                       ? "bg-gray-400 cursor-not-allowed"
                       : "bg-gradient-to-r from-pink-600 to-purple-600 hover:shadow-2xl hover:scale-105"
                   }`}
