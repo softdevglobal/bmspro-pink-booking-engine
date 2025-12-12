@@ -2,7 +2,13 @@ import { db } from "@/lib/firebase";
 import { collection, addDoc, serverTimestamp, query, where, getDocs, orderBy, limit, doc, updateDoc } from "firebase/firestore";
 import type { BookingStatus } from "./bookingTypes";
 
-export type NotificationType = "booking_confirmed" | "booking_completed" | "booking_canceled" | "booking_status_changed";
+// Customer-facing notification types (what customers see in booking engine)
+export type NotificationType = 
+  | "booking_confirmed" 
+  | "booking_completed" 
+  | "booking_canceled" 
+  | "booking_status_changed"
+  | "booking_processing";  // When booking is being processed by staff
 
 export interface Notification {
   id?: string;
@@ -135,6 +141,8 @@ export async function deleteNotification(notificationId: string): Promise<void> 
 
 /**
  * Get notification title and message based on status
+ * This is for CUSTOMER-facing notifications in the booking engine
+ * We hide internal workflow details (like staff approval) from customers
  */
 export function getNotificationContent(
   status: BookingStatus, 
@@ -175,6 +183,20 @@ export function getNotificationContent(
         message: `Your booking request${code}${serviceAndStaff} has been received successfully! We'll confirm your appointment soon.`,
         type: "booking_status_changed"
       };
+    // Hide "AwaitingStaffApproval" from customers - show as "processing"
+    case "AwaitingStaffApproval":
+      return {
+        title: "Booking Being Processed",
+        message: `Your booking request${code}${serviceAndStaff}${datetime} is being processed. We'll notify you once it's confirmed.`,
+        type: "booking_processing"
+      };
+    // Hide "StaffRejected" from customers - show as "being rescheduled"
+    case "StaffRejected":
+      return {
+        title: "Booking Being Rescheduled",
+        message: `Your booking${code}${serviceAndStaff}${datetime} is being rescheduled. We'll notify you with updated details soon.`,
+        type: "booking_status_changed"
+      };
     case "Confirmed":
       return {
         title: "Booking Confirmed",
@@ -196,9 +218,32 @@ export function getNotificationContent(
     default:
       return {
         title: "Booking Status Updated",
-        message: `Your booking${code} status has been updated to ${status}.`,
+        message: `Your booking${code} status has been updated.`,
         type: "booking_status_changed"
       };
+  }
+}
+
+/**
+ * Get customer-friendly status label
+ * Hides internal workflow details from customers
+ */
+export function getCustomerFriendlyStatus(status: BookingStatus): string {
+  switch (status) {
+    case "Pending":
+      return "Pending Review";
+    case "AwaitingStaffApproval":
+      return "Processing";
+    case "StaffRejected":
+      return "Being Rescheduled";
+    case "Confirmed":
+      return "Confirmed";
+    case "Completed":
+      return "Completed";
+    case "Canceled":
+      return "Canceled";
+    default:
+      return "Processing";
   }
 }
 
