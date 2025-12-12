@@ -513,23 +513,32 @@ function BookPageContent() {
       // Only show active staff
       if (st.status && st.status !== "Active") return false;
       
-      // If date is selected, check weekly schedule
-      if (dayOfWeek && (st as any).weeklySchedule) {
-        const schedule = (st as any).weeklySchedule[dayOfWeek];
-        if (!schedule) return false;
-        if (schedule.branchId && schedule.branchId !== bkBranchId) return false;
-      } else {
-        if (st.branchId && st.branchId !== bkBranchId) return false;
-      }
-      
-      // Check service capability
+      // CRITICAL: Check service capability FIRST
       if (service?.staffIds && service.staffIds.length > 0) {
          // Check both id and uid
          const canPerform = service.staffIds.some(id => String(id) === st.id || String(id) === (st as any).uid);
          if (!canPerform) return false;
       }
       
-      return true;
+      // If date is selected, check weekly schedule for branch assignment
+      if (dayOfWeek && (st as any).weeklySchedule && typeof (st as any).weeklySchedule === 'object') {
+        const daySchedule = (st as any).weeklySchedule[dayOfWeek];
+        
+        // If staff has a schedule entry for this day with a specific branch, check it matches
+        if (daySchedule && daySchedule.branchId) {
+          return daySchedule.branchId === bkBranchId;
+        }
+        
+        // If schedule entry is null/undefined for this day, staff is not working
+        if (daySchedule === null || daySchedule === undefined) {
+          return false;
+        }
+        
+        // Schedule exists but no branchId specified - fall through to default branch check
+      }
+      
+      // Default: check staff's primary branchId
+      return st.branchId === bkBranchId;
     });
   };
   
