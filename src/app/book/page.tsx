@@ -575,7 +575,7 @@ function BookPageContent() {
     };
     
     for (let h = startHour; h < endHour; h++) {
-      for (const m of [0, 30]) {
+      for (const m of [0, 15, 30, 45]) {
         const timeStr = `${String(h).padStart(2, "0")}:${String(m).padStart(2, "0")}`;
         
         // Check if this slot + duration fits within working hours
