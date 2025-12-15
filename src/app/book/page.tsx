@@ -102,7 +102,7 @@ function BookPageContent() {
   const [branches, setBranches] = useState<Array<{ id: string; name: string; address?: string }>>([]);
   const [servicesList, setServicesList] = useState<Array<{ id: string | number; name: string; price?: number; duration?: number; icon?: string; branches?: string[]; staffIds?: string[] }>>([]);
   const [staffList, setStaffList] = useState<Array<{ id: string; name: string; role?: string; status?: string; avatar?: string; branchId?: string; branch?: string }>>([]);
-  const [bookings, setBookings] = useState<Array<{ id: string; staffId?: string; date: string; time: string; duration: number; status: string }>>([]);
+  const [bookings, setBookings] = useState<Array<{ id: string; staffId?: string; date: string; time: string; duration: number; status: string; services?: Array<{ staffId?: string; time?: string; duration?: number }> }>>([]);
   const [loading, setLoading] = useState<boolean>(true);
 
   // Check authentication status
@@ -437,8 +437,8 @@ function BookPageContent() {
 
   const monthName = new Date(bkMonthYear.year, bkMonthYear.month).toLocaleDateString("en", { month: "long", year: "numeric" });
 
-  // Compute available time slots
-  const computeSlots = (forServiceId?: number | string): string[] => {
+  // Compute all time slots with availability status
+  const computeSlots = (forServiceId?: number | string): Array<{ time: string; available: boolean; reason?: string }> => {
     if (!bkDate) return [];
     
     // Get duration of the service we're scheduling
@@ -448,32 +448,134 @@ function BookPageContent() {
       serviceDuration = service?.duration || 60;
     }
     
-    const slots: string[] = [];
+    const slots: Array<{ time: string; available: boolean; reason?: string }> = [];
     const startHour = 9;
     const endHour = 18;
 
-    // Get occupied slots if a staff member is selected for this service
+    // Get the staff member selected for this service
     const staffIdForService = forServiceId ? bkServiceStaff[String(forServiceId)] : null;
-    const relevantBookings = staffIdForService
-      ? bookings.filter(b => b.staffId === staffIdForService && b.status !== "Canceled")
-      : []; // If no staff selected, we might need to check if ANY staff is available, but for now let's assume generic availability if no staff picked
-      // Actually, if no staff is picked ("Any Available"), we should ideally check if *at least one* staff is free.
-      // But the current logic didn't seem to do that deeply. Let's stick to: if staff selected, check their calendar.
+    
+    // Helper function to check if a booking status is active (should block slots)
+    const isActiveStatus = (status: string | undefined): boolean => {
+      if (!status) return true; // No status = assume active
+      const lowerStatus = status.toLowerCase();
+      // These statuses should NOT block slots
+      const inactiveStatuses = ['cancelled', 'canceled', 'completed', 'staffrejected', 'rejected'];
+      return !inactiveStatuses.includes(lowerStatus);
+    };
+    
+    // Helper function to check if a booking involves the selected staff
+    const bookingInvolvesStaff = (booking: any, targetStaffId: string): boolean => {
+      // Check root-level staffId
+      if (booking.staffId === targetStaffId) return true;
+      
+      // Check services array for multi-service bookings
+      if (Array.isArray(booking.services)) {
+        for (const svc of booking.services) {
+          if (svc && svc.staffId === targetStaffId) {
+            return true;
+          }
+        }
+      }
+      
+      return false;
+    };
+    
+    // Filter bookings to only those relevant to the selected staff
+    const relevantBookings = staffIdForService && staffIdForService !== "any"
+      ? bookings.filter(b => isActiveStatus(b.status) && bookingInvolvesStaff(b, staffIdForService))
+      : [];
 
-    const isSlotOccupied = (startMin: number, endMin: number) => {
-       if (!staffIdForService) return false; // optimizing for "Any"
-       // Check overlap with relevant bookings
-       // This is a simplified check; real system might need more complex availability
-       return relevantBookings.some(b => {
-         const bStart = b.time.split(':').map(Number);
-         const bStartMin = bStart[0] * 60 + bStart[1];
-         const bEndMin = bStartMin + b.duration;
-         return (startMin < bEndMin && endMin > bStartMin);
-       });
+    // Check if a slot is blocked by OTHER services selected in the CURRENT booking session
+    // (for the same staff member) - only block if slot time falls within another service's period
+    const isSlotBlockedByCurrentSelection = (slotStartMin: number): boolean => {
+      if (!staffIdForService || staffIdForService === "any") return false;
+      if (!forServiceId) return false;
+      
+      // Go through all other services selected in this booking
+      for (const otherServiceId of bkSelectedServices) {
+        // Skip the current service we're computing slots for
+        if (String(otherServiceId) === String(forServiceId)) continue;
+        
+        // Get the staff selected for this other service
+        const otherStaffId = bkServiceStaff[String(otherServiceId)];
+        
+        // Only block if SAME staff member is selected for both services
+        if (otherStaffId !== staffIdForService) continue;
+        
+        // Get the time selected for this other service
+        const otherTime = bkServiceTimes[String(otherServiceId)];
+        if (!otherTime) continue;
+        
+        // Get the duration of the other service
+        const otherService = servicesList.find((s) => String(s.id) === String(otherServiceId));
+        const otherDuration = otherService?.duration || 60;
+        
+        // Parse the other service's time
+        const otherTimeParts = otherTime.split(':').map(Number);
+        if (otherTimeParts.length < 2) continue;
+        
+        const otherStartMin = otherTimeParts[0] * 60 + otherTimeParts[1];
+        const otherEndMin = otherStartMin + otherDuration;
+        
+        // Check if this slot time falls WITHIN the other service's period
+        // Slot is blocked if: other_start <= slot_time < other_end
+        if (slotStartMin >= otherStartMin && slotStartMin < otherEndMin) {
+          return true;
+        }
+      }
+      
+      return false;
+    };
+
+    // Check if a specific time slot is OCCUPIED (booking is in progress at that time)
+    // This only checks if the SLOT TIME falls within an existing booking, 
+    // NOT whether the new service duration would overlap
+    const isSlotOccupied = (slotStartMin: number): boolean => {
+      if (!staffIdForService || staffIdForService === "any") return false;
+      
+      for (const booking of relevantBookings) {
+        // If booking has individual services, check each service's time slot separately
+        if (Array.isArray(booking.services) && booking.services.length > 0) {
+          for (const svc of booking.services) {
+            // Only check if this service involves our staff
+            if (svc && svc.staffId === staffIdForService && svc.time) {
+              const svcTimeParts = svc.time.split(':').map(Number);
+              if (svcTimeParts.length >= 2) {
+                const svcStartMin = svcTimeParts[0] * 60 + svcTimeParts[1];
+                const svcDuration = svc.duration || 60;
+                const svcEndMin = svcStartMin + svcDuration;
+                
+                // Check if this slot time falls WITHIN the booking period
+                // Slot is blocked if: booking_start <= slot_time < booking_end
+                if (slotStartMin >= svcStartMin && slotStartMin < svcEndMin) {
+                  return true;
+                }
+              }
+            }
+          }
+        } else {
+          // Single-service booking - use main booking time and duration
+          if (booking.time) {
+            const timeParts = booking.time.split(':').map(Number);
+            if (timeParts.length >= 2) {
+              const bStartMin = timeParts[0] * 60 + timeParts[1];
+              const bEndMin = bStartMin + (booking.duration || 60);
+              
+              // Check if this slot time falls WITHIN the booking period
+              if (slotStartMin >= bStartMin && slotStartMin < bEndMin) {
+                return true;
+              }
+            }
+          }
+        }
+      }
+      
+      return false;
     };
     
     for (let h = startHour; h < endHour; h++) {
-      for (let m of [0, 30]) {
+      for (const m of [0, 30]) {
         const timeStr = `${String(h).padStart(2, "0")}:${String(m).padStart(2, "0")}`;
         
         // Check if this slot + duration fits within working hours
@@ -482,8 +584,22 @@ function BookPageContent() {
         const slotEndMinutes = slotStartMinutes + serviceDuration;
         const endHourMinutes = endHour * 60;
         
-        if (slotEndMinutes <= endHourMinutes && !isSlotOccupied(slotStartMinutes, slotEndMinutes)) {
-          slots.push(timeStr);
+        // Slot must fit in working hours
+        if (slotEndMinutes > endHourMinutes) {
+          continue; // Skip slots that don't fit
+        }
+        
+        // Check availability status
+        // Only check if the slot TIME is occupied (not considering new service duration)
+        const occupiedByBooking = isSlotOccupied(slotStartMinutes);
+        const blockedBySelection = isSlotBlockedByCurrentSelection(slotStartMinutes);
+        
+        if (occupiedByBooking) {
+          slots.push({ time: timeStr, available: false, reason: 'booked' });
+        } else if (blockedBySelection) {
+          slots.push({ time: timeStr, available: false, reason: 'selected' });
+        } else {
+          slots.push({ time: timeStr, available: true });
         }
       }
     }
@@ -586,38 +702,57 @@ function BookPageContent() {
     }
 
     try {
+      // Build services array with times
+      const servicesWithTimes = selectedServiceObjects.map((s) => {
+        const sId = String(s?.id);
+        const stId = bkServiceStaff[sId];
+        const stName = stId ? staffList.find(st => st.id === stId)?.name : "Any Available";
+        return {
+          id: s?.id || "",
+          name: s?.name || "",
+          price: s?.price || 0,
+          duration: s?.duration || 0,
+          time: bkServiceTimes[sId] || "",
+          staffId: stId || null,
+          staffName: stName
+        };
+      });
+      
+      // Sort services by time (earliest first)
+      servicesWithTimes.sort((a, b) => {
+        const timeA = a.time.split(':').map(Number);
+        const timeB = b.time.split(':').map(Number);
+        const minutesA = timeA[0] * 60 + (timeA[1] || 0);
+        const minutesB = timeB[0] * 60 + (timeB[1] || 0);
+        return minutesA - minutesB;
+      });
+      
+      // Use earliest service's time as main booking time
+      const earliestTime = servicesWithTimes[0]?.time || mainBookingTime;
+      
+      // Recalculate service names/IDs in time order
+      const sortedServiceNames = servicesWithTimes.map(s => s.name).join(", ");
+      const sortedServiceIds = servicesWithTimes.map(s => s.id).join(",");
+      
       const result = await createBooking({
         ownerUid,
         client: currentCustomer.fullName || "Customer",
         clientEmail: currentCustomer.email || "",
         clientPhone: currentCustomer.phone || "",
         notes: bkNotes?.trim() || undefined,
-        serviceId: serviceIds, // Multiple service IDs as comma-separated
-        serviceName: serviceNames, // Multiple service names
+        serviceId: sortedServiceIds, // Multiple service IDs as comma-separated (sorted by time)
+        serviceName: sortedServiceNames, // Multiple service names (sorted by time)
         staffId: mainStaffId,
         staffName: mainStaffName,
         branchId: bkBranchId,
         branchName: selectedBranch?.name || "",
         date: formatLocalYmd(bkDate),
-        time: mainBookingTime,
+        time: earliestTime, // Use the earliest service time
         duration: totalDuration,
         status: "Pending",
         price: totalPrice,
         customerUid: currentCustomer.uid,
-        services: selectedServiceObjects.map((s) => {
-          const sId = String(s?.id);
-          const stId = bkServiceStaff[sId];
-          const stName = stId ? staffList.find(st => st.id === stId)?.name : "Any Available";
-          return {
-            id: s?.id || "",
-            name: s?.name || "",
-            price: s?.price || 0,
-            duration: s?.duration || 0,
-            time: bkServiceTimes[sId] || "",
-            staffId: stId || null,
-            staffName: stName
-          };
-        }),
+        services: servicesWithTimes, // Already sorted by time
       });
       
       await incrementCustomerBookings(currentCustomer.uid);
@@ -1379,19 +1514,36 @@ function BookPageContent() {
                                     No available slots for this staff/time combination
                                   </div>
                                 ) : (
-                                  slots.map((time) => (
-                                    <button
-                                      key={time}
-                                      onClick={() => setBkServiceTimes({ ...bkServiceTimes, [String(serviceId)]: time })}
-                                      className={`py-2 px-1 rounded-lg font-semibold text-xs transition-all ${
-                                        selectedTime === time
-                                          ? "bg-gradient-to-r from-pink-600 to-purple-600 text-white shadow-md transform scale-105"
-                                          : "bg-white text-gray-700 border border-gray-200 hover:border-pink-300 hover:bg-pink-50"
-                                      }`}
-                                    >
-                                      {time}
-                                    </button>
-                                  ))
+                                  slots.map((slot) => {
+                                    const isSelected = selectedTime === slot.time;
+                                    const isDisabled = !slot.available;
+                                    const isBookedByOther = slot.reason === 'booked';
+                                    const isSelectedForOtherService = slot.reason === 'selected';
+                                    
+                                    return (
+                                      <button
+                                        key={slot.time}
+                                        onClick={() => {
+                                          if (!isDisabled) {
+                                            setBkServiceTimes({ ...bkServiceTimes, [String(serviceId)]: slot.time });
+                                          }
+                                        }}
+                                        disabled={isDisabled}
+                                        title={isDisabled ? (isBookedByOther ? 'Already booked by another customer' : 'Selected for another service in this booking') : 'Available'}
+                                        className={`py-2 px-1 rounded-lg font-semibold text-xs transition-all ${
+                                          isSelected
+                                            ? "bg-gradient-to-r from-pink-600 to-purple-600 text-white shadow-md transform scale-105"
+                                            : isBookedByOther
+                                              ? "bg-red-50 text-red-400 border border-red-200 cursor-not-allowed line-through"
+                                              : isSelectedForOtherService
+                                                ? "bg-amber-50 text-amber-500 border border-amber-200 cursor-not-allowed"
+                                                : "bg-white text-gray-700 border border-gray-200 hover:border-pink-300 hover:bg-pink-50"
+                                        }`}
+                                      >
+                                        {slot.time}
+                                      </button>
+                                    );
+                                  })
                                 )}
                               </div>
                             </div>
