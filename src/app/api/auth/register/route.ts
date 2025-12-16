@@ -5,6 +5,12 @@ import { getAdminApp } from "@/lib/firebaseAdmin";
 
 export async function POST(request: NextRequest) {
   try {
+    // Security: Limit request size to prevent DoS attacks (CVE-2025-55184)
+    const contentLength = request.headers.get("content-length");
+    if (contentLength && parseInt(contentLength) > 1024 * 1024) { // 1MB limit
+      return NextResponse.json({ error: "Request too large" }, { status: 413 });
+    }
+
     const body = await request.json();
     const { email, password, fullName, phone } = body;
 

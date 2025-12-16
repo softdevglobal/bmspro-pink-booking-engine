@@ -36,6 +36,12 @@ type CreateBookingRequestInput = {
 
 export async function POST(req: NextRequest) {
   try {
+    // Security: Limit request size to prevent DoS attacks (CVE-2025-55184)
+    const contentLength = req.headers.get("content-length");
+    if (contentLength && parseInt(contentLength) > 1024 * 1024) { // 1MB limit
+      return NextResponse.json({ error: "Request too large" }, { status: 413 });
+    }
+
     const body = (await req.json()) as Partial<CreateBookingRequestInput>;
 
     // Basic validation
