@@ -149,14 +149,14 @@ function BookPageContent() {
           const customerData = customerSnap.exists() 
             ? {
               uid: user.uid,
-                email: customerSnap.data().email || user.email,
-                fullName: customerSnap.data().fullName || user.displayName,
-                phone: customerSnap.data().phone || "",
+                email: customerSnap.data().email || user.email || "",
+                fullName: customerSnap.data().fullName || user.displayName || "",
+                phone: customerSnap.data().phone || customerSnap.data().phoneNumber || "",
               }
             : {
               uid: user.uid,
-              email: user.email,
-              fullName: user.displayName,
+              email: user.email || "",
+              fullName: user.displayName || "",
               phone: "",
               };
           
@@ -195,6 +195,36 @@ function BookPageContent() {
 
     return () => unsubscribe();
   }, []);
+
+  // Refresh customer data from Firestore when authenticated to ensure phone number is loaded
+  useEffect(() => {
+    const refreshCustomerData = async () => {
+      if (!isAuthenticated || !currentCustomer?.uid) return;
+      
+      try {
+        const { doc, getDoc } = await import("firebase/firestore");
+        const customerRef = doc(db, "customers", currentCustomer.uid);
+        const customerSnap = await getDoc(customerRef);
+        
+        if (customerSnap.exists()) {
+          const customerData = customerSnap.data();
+          // Update currentCustomer with latest data, especially phone number
+          // Check for both 'phone' and 'phoneNumber' field names
+          const phoneNumber = customerData.phone || customerData.phoneNumber || currentCustomer.phone || "";
+          setCurrentCustomer({
+            uid: currentCustomer.uid,
+            email: customerData.email || currentCustomer.email || "",
+            fullName: customerData.fullName || currentCustomer.fullName || "",
+            phone: phoneNumber,
+          });
+        }
+      } catch (error) {
+        console.error("Error refreshing customer data:", error);
+      }
+    };
+
+    refreshCustomerData();
+  }, [isAuthenticated, currentCustomer?.uid]);
 
   // Load salon data
   useEffect(() => {
