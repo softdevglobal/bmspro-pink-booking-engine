@@ -656,8 +656,14 @@ function BookPageContent() {
     const endMinutes = Math.floor(endHour) * 60 + Math.round((endHour % 1) * 60);
     const interval = 15;
     
-    for (let slotStartMinutes = startMinutes; slotStartMinutes < endMinutes; slotStartMinutes += interval) {
-      // Check if slot + duration fits before closing time
+    // Calculate the latest possible slot start time
+    // The service must finish by closing time, so: slotStart + duration <= endMinutes
+    // Therefore: slotStart <= endMinutes - duration
+    const latestSlotStart = endMinutes - serviceDuration;
+    
+    // Only generate slots that can finish by closing time
+    for (let slotStartMinutes = startMinutes; slotStartMinutes <= latestSlotStart; slotStartMinutes += interval) {
+      // Verify: slot + duration must not exceed closing time (safety check)
       const slotEndMinutes = slotStartMinutes + serviceDuration;
       if (slotEndMinutes > endMinutes) {
         break; // Stop if slot doesn't fit
