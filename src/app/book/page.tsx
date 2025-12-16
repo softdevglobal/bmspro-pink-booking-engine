@@ -100,7 +100,7 @@ function BookPageContent() {
   const [salonPhone, setSalonPhone] = useState<string>("");
   const [salonAbn, setSalonAbn] = useState<string>("");
   const [salonLogo, setSalonLogo] = useState<string>("");
-  const [branches, setBranches] = useState<Array<{ id: string; name: string; address?: string }>>([]);
+  const [branches, setBranches] = useState<Array<{ id: string; name: string; address?: string; hours?: any }>>([]);
   const [servicesList, setServicesList] = useState<Array<{ id: string | number; name: string; price?: number; duration?: number; icon?: string; branches?: string[]; staffIds?: string[] }>>([]);
   const [staffList, setStaffList] = useState<Array<{ id: string; name: string; role?: string; status?: string; avatar?: string; branchId?: string; branch?: string }>>([]);
   const [bookings, setBookings] = useState<Array<{ id: string; staffId?: string; date: string; time: string; duration: number; status: string; services?: Array<{ staffId?: string; time?: string; duration?: number }> }>>([]);
@@ -470,7 +470,7 @@ function BookPageContent() {
 
   // Compute all time slots with availability status
   const computeSlots = (forServiceId?: number | string): Array<{ time: string; available: boolean; reason?: string }> => {
-    if (!bkDate) return [];
+    if (!bkDate || !bkBranchId) return [];
     
     // Get duration of the service we're scheduling
     let serviceDuration = 60;
@@ -479,9 +479,56 @@ function BookPageContent() {
       serviceDuration = service?.duration || 60;
     }
     
+    // Get branch hours for the selected date
+    const selectedBranch = branches.find((b) => b.id === bkBranchId);
+    if (!selectedBranch) {
+      // If branch not found, use default hours
+      console.warn("Branch not found for ID:", bkBranchId, "- using default hours");
+    }
+    
+    const dayNames = ["Sunday", "Monday", "Tuesday", "Wednesday", "Thursday", "Friday", "Saturday"];
+    const dayOfWeek = dayNames[bkDate.getDay()];
+    
+    // Get branch hours for this day
+    let startHour = 9; // Default fallback
+    let endHour = 18; // Default fallback
+    let isClosed = false;
+    
+    // Handle branch hours - can be object or string
+    if (selectedBranch?.hours) {
+      if (typeof selectedBranch.hours === 'object' && !Array.isArray(selectedBranch.hours)) {
+        const dayHours = (selectedBranch.hours as any)[dayOfWeek];
+        if (dayHours) {
+          if (dayHours.closed) {
+            isClosed = true;
+          } else {
+            if (dayHours.open) {
+              const [openH, openM] = dayHours.open.split(':').map(Number);
+              startHour = openH + (openM || 0) / 60;
+            }
+            if (dayHours.close) {
+              const [closeH, closeM] = dayHours.close.split(':').map(Number);
+              endHour = closeH + (closeM || 0) / 60;
+            }
+          }
+        }
+      }
+      // If hours is a string, ignore it and use defaults
+    }
+
+    if (isClosed) {
+      return []; // Return empty slots if branch is closed
+    }
+
     const slots: Array<{ time: string; available: boolean; reason?: string }> = [];
-    const startHour = 9;
-    const endHour = 18;
+    
+    // Check if date is today to filter past times
+    const today = new Date();
+    today.setHours(0, 0, 0, 0);
+    const selectedDateOnly = new Date(bkDate);
+    selectedDateOnly.setHours(0, 0, 0, 0);
+    const isToday = selectedDateOnly.getTime() === today.getTime();
+    const currentMinutes = isToday ? (new Date().getHours() * 60 + new Date().getMinutes()) : -1;
 
     // Get the staff member selected for this service
     const staffIdForService = forServiceId ? bkServiceStaff[String(forServiceId)] : null;
@@ -603,33 +650,39 @@ function BookPageContent() {
       return false;
     };
     
-    for (let h = startHour; h < endHour; h++) {
-      for (const m of [0, 15, 30, 45]) {
-        const timeStr = `${String(h).padStart(2, "0")}:${String(m).padStart(2, "0")}`;
-        
-        // Check if this slot + duration fits within working hours
-        const [hours, minutes] = timeStr.split(':').map(Number);
-        const slotStartMinutes = hours * 60 + minutes;
-        const slotEndMinutes = slotStartMinutes + serviceDuration;
-        const endHourMinutes = endHour * 60;
-        
-        // Slot must fit in working hours
-        if (slotEndMinutes > endHourMinutes) {
-          continue; // Skip slots that don't fit
-        }
-        
-        // Check availability status
-        // Only check if the slot TIME is occupied (not considering new service duration)
-        const occupiedByBooking = isSlotOccupied(slotStartMinutes);
-        const blockedBySelection = isSlotBlockedByCurrentSelection(slotStartMinutes);
-        
-        if (occupiedByBooking) {
-          slots.push({ time: timeStr, available: false, reason: 'booked' });
-        } else if (blockedBySelection) {
-          slots.push({ time: timeStr, available: false, reason: 'selected' });
-        } else {
-          slots.push({ time: timeStr, available: true });
-        }
+    // Generate slots using branch hours
+    // Convert hours to minutes (e.g., 9.5 hours = 9*60 + 30 = 570 minutes)
+    const startMinutes = Math.floor(startHour) * 60 + Math.round((startHour % 1) * 60);
+    const endMinutes = Math.floor(endHour) * 60 + Math.round((endHour % 1) * 60);
+    const interval = 15;
+    
+    for (let slotStartMinutes = startMinutes; slotStartMinutes < endMinutes; slotStartMinutes += interval) {
+      // Check if slot + duration fits before closing time
+      const slotEndMinutes = slotStartMinutes + serviceDuration;
+      if (slotEndMinutes > endMinutes) {
+        break; // Stop if slot doesn't fit
+      }
+
+      // Skip past times if date is today
+      if (isToday && slotStartMinutes <= currentMinutes) {
+        continue;
+      }
+
+      const hours = Math.floor(slotStartMinutes / 60);
+      const minutes = slotStartMinutes % 60;
+      const timeStr = `${String(hours).padStart(2, "0")}:${String(minutes).padStart(2, "0")}`;
+      
+      // Check availability status
+      // Only check if the slot TIME is occupied (not considering new service duration)
+      const occupiedByBooking = isSlotOccupied(slotStartMinutes);
+      const blockedBySelection = isSlotBlockedByCurrentSelection(slotStartMinutes);
+      
+      if (occupiedByBooking) {
+        slots.push({ time: timeStr, available: false, reason: 'booked' });
+      } else if (blockedBySelection) {
+        slots.push({ time: timeStr, available: false, reason: 'selected' });
+      } else {
+        slots.push({ time: timeStr, available: true });
       }
     }
     
