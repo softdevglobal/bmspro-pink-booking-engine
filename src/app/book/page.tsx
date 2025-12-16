@@ -761,9 +761,23 @@ function BookPageContent() {
       setShowSuccess(true);
       
       // We don't reset here anymore, we reset when closing the success modal
-    } catch (error) {
+    } catch (error: any) {
       console.error("Error creating booking:", error);
-      alert("Failed to create booking. Please try again.");
+      
+      // Check if it's a conflict error (409) or contains booking conflict message
+      let errorMessage = "Failed to create booking. Please try again.";
+      
+      if (error.status === 409 || (error.message && error.message.includes("already booked"))) {
+        errorMessage = error.details || "This time slot has already been booked by another customer. Please select a different time.";
+      } else if (error.message && error.message.includes("conflicts")) {
+        errorMessage = error.message;
+      } else if (error.details) {
+        errorMessage = error.details;
+      } else if (error.message) {
+        errorMessage = error.message;
+      }
+      
+      alert(errorMessage);
     } finally {
       setSubmittingBooking(false);
     }

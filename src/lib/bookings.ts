@@ -81,7 +81,10 @@ export async function createBooking(input: BookingInput): Promise<{ id: string; 
 
     const json = await res.json();
     if (!res.ok) {
-      throw new Error(json?.error || "Failed to create booking");
+      const error: any = new Error(json?.error || "Failed to create booking");
+      error.status = res.status;
+      error.details = json?.details;
+      throw error;
     }
     return { id: json.id, bookingCode: json.bookingCode };
   } catch (error) {
