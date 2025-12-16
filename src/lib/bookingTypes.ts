@@ -100,3 +100,16 @@ export function getCustomerStatusLabel(status: BookingStatus): string {
   }
 }
 
+/**
+ * Check if a booking status should block time slots (i.e., is an active booking)
+ * Returns true if the booking is active and should block slots
+ * Returns false if the booking is inactive (cancelled, completed, rejected) and should NOT block slots
+ */
+export function shouldBlockSlots(status: string | null | undefined): boolean {
+  if (!status) return true; // No status = assume active (block slots)
+  const normalized = normalizeBookingStatus(status);
+  // These statuses should NOT block slots (booking is inactive)
+  const inactiveStatuses: BookingStatus[] = ['Canceled', 'Completed', 'StaffRejected'];
+  return !inactiveStatuses.includes(normalized);
+}
+

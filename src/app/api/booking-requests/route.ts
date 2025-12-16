@@ -3,6 +3,7 @@ import { adminDb } from "@/lib/firebaseAdmin";
 import { FieldValue } from "firebase-admin/firestore";
 import { generateBookingCode } from "@/lib/bookings";
 import { getNotificationContent } from "@/lib/notifications";
+import { shouldBlockSlots } from "@/lib/bookingTypes";
 
 export const runtime = "nodejs";
 
@@ -90,12 +91,9 @@ export async function POST(req: NextRequest) {
       return parts[0] * 60 + parts[1];
     };
 
-    // Helper function to check if a booking status is active (should block slots)
+    // Use centralized helper to check if booking status should block slots
     const isActiveStatus = (status: string | undefined): boolean => {
-      if (!status) return true; // No status = assume active
-      const lowerStatus = status.toLowerCase();
-      const inactiveStatuses = ['cancelled', 'canceled', 'completed', 'staffrejected', 'rejected'];
-      return !inactiveStatuses.includes(lowerStatus);
+      return shouldBlockSlots(status);
     };
 
     // Check for existing bookings that would conflict
@@ -115,13 +113,13 @@ export async function POST(req: NextRequest) {
       ]);
 
       // Combine results from both collections
-      const allExistingBookings = [
+      const allExistingBookings: Array<any> = [
         ...bookingsSnapshot.docs.map(doc => ({ id: doc.id, ...doc.data() })),
         ...bookingRequestsSnapshot.docs.map(doc => ({ id: doc.id, ...doc.data() }))
       ];
 
       // Check each service in the new booking request
-      const servicesToCheck = body.services && Array.isArray(body.services) && body.services.length > 0
+      const servicesToCheck: Array<any> = body.services && Array.isArray(body.services) && body.services.length > 0
         ? body.services
         : [{
             id: body.serviceId,

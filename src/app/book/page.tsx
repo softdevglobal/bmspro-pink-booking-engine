@@ -3,6 +3,7 @@
 import React, { useEffect, useState, Suspense } from "react";
 import { useSearchParams, useRouter } from "next/navigation";
 import { createBooking, subscribeBookingsForOwnerAndDate } from "@/lib/bookings";
+import { shouldBlockSlots } from "@/lib/bookingTypes";
 import { auth, db } from "@/lib/firebase";
 import { signInWithCustomToken, onAuthStateChanged, signOut } from "firebase/auth";
 import { createCustomerDocument, incrementCustomerBookings } from "@/lib/customers";
@@ -455,13 +456,9 @@ function BookPageContent() {
     // Get the staff member selected for this service
     const staffIdForService = forServiceId ? bkServiceStaff[String(forServiceId)] : null;
     
-    // Helper function to check if a booking status is active (should block slots)
+    // Use centralized helper to check if booking status should block slots
     const isActiveStatus = (status: string | undefined): boolean => {
-      if (!status) return true; // No status = assume active
-      const lowerStatus = status.toLowerCase();
-      // These statuses should NOT block slots
-      const inactiveStatuses = ['cancelled', 'canceled', 'completed', 'staffrejected', 'rejected'];
-      return !inactiveStatuses.includes(lowerStatus);
+      return shouldBlockSlots(status);
     };
     
     // Helper function to check if a booking involves the selected staff
@@ -482,6 +479,8 @@ function BookPageContent() {
     };
     
     // Filter bookings to only those relevant to the selected staff
+    // NOTE: When a booking is cancelled, isActiveStatus returns false (via shouldBlockSlots),
+    // so it's automatically excluded, making the slot available again in real-time
     const relevantBookings = staffIdForService && staffIdForService !== "any"
       ? bookings.filter(b => isActiveStatus(b.status) && bookingInvolvesStaff(b, staffIdForService))
       : [];
