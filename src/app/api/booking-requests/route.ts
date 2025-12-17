@@ -5,6 +5,102 @@ import { generateBookingCode } from "@/lib/bookings";
 import { getNotificationContent } from "@/lib/notifications";
 import { shouldBlockSlots } from "@/lib/bookingTypes";
 
+/**
+ * Check if a staff ID is a valid assigned staff (not "Any Available" or empty)
+ */
+function isValidStaffAssignment(staffId?: string | null): boolean {
+  if (!staffId) return false;
+  if (staffId === "null" || staffId === "") return false;
+  // "Any Available" type values
+  if (staffId.toLowerCase().includes("any")) return false;
+  return true;
+}
+
+/**
+ * Analyze staff assignments in a booking
+ * Returns details about which services have staff and which don't
+ */
+function analyzeStaffAssignments(
+  services?: Array<{ staffId?: string | null; staffName?: string | null }>,
+  staffId?: string | null
+): { 
+  hasAnyAssignedStaff: boolean;  // At least one service has staff
+  hasAnyUnassignedStaff: boolean;  // At least one service needs staff assignment
+  allAssigned: boolean;  // All services have staff
+  noneAssigned: boolean;  // No services have staff
+} {
+  // Check services array for multi-service bookings
+  if (services && Array.isArray(services) && services.length > 0) {
+    const assignedCount = services.filter(s => isValidStaffAssignment(s.staffId)).length;
+    const totalCount = services.length;
+    
+    return {
+      hasAnyAssignedStaff: assignedCount > 0,
+      hasAnyUnassignedStaff: assignedCount < totalCount,
+      allAssigned: assignedCount === totalCount,
+      noneAssigned: assignedCount === 0,
+    };
+  }
+  
+  // Single service booking
+  const isAssigned = isValidStaffAssignment(staffId);
+  return {
+    hasAnyAssignedStaff: isAssigned,
+    hasAnyUnassignedStaff: !isAssigned,
+    allAssigned: isAssigned,
+    noneAssigned: !isAssigned,
+  };
+}
+
+/**
+ * Create staff assignment notification
+ */
+async function createStaffAssignmentNotification(db: FirebaseFirestore.Firestore, data: {
+  bookingId: string;
+  bookingCode?: string;
+  staffUid: string;
+  staffName?: string;
+  clientName: string;
+  clientPhone?: string;
+  serviceName?: string;
+  services?: Array<{ name: string; staffName?: string; staffId?: string }>;
+  branchName?: string;
+  bookingDate: string;
+  bookingTime: string;
+  duration?: number;
+  price?: number;
+  ownerUid: string;
+}): Promise<void> {
+  const serviceList = data.services && data.services.length > 0
+    ? data.services.filter(s => s.staffId === data.staffUid).map(s => s.name).join(", ")
+    : data.serviceName || "Service";
+
+  const notificationPayload = {
+    bookingId: data.bookingId,
+    bookingCode: data.bookingCode || null,
+    type: "staff_assignment",
+    title: "New Appointment Request",
+    message: `You have a new appointment request from ${data.clientName} for ${serviceList} on ${data.bookingDate} at ${data.bookingTime}. Please accept or reject this booking.`,
+    status: "AwaitingStaffApproval",
+    ownerUid: data.ownerUid,
+    staffUid: data.staffUid,
+    staffName: data.staffName || null,
+    clientName: data.clientName,
+    clientPhone: data.clientPhone || null,
+    serviceName: data.serviceName || null,
+    services: data.services || null,
+    branchName: data.branchName || null,
+    bookingDate: data.bookingDate,
+    bookingTime: data.bookingTime,
+    duration: data.duration || null,
+    price: data.price || null,
+    read: false,
+    createdAt: FieldValue.serverTimestamp(),
+  };
+
+  await db.collection("notifications").add(notificationPayload);
+}
+
 export const runtime = "nodejs";
 
 type CreateBookingRequestInput = {
@@ -215,6 +311,30 @@ export async function POST(req: NextRequest) {
 
     const bookingCode = generateBookingCode();
     
+    // Analyze staff assignments to determine workflow
+    const staffAnalysis = analyzeStaffAssignments(body.services, body.staffId);
+    
+    // Initialize services with approval status
+    let processedServices = body.services || null;
+    if (processedServices && Array.isArray(processedServices) && processedServices.length > 0) {
+      processedServices = processedServices.map(service => ({
+        ...service,
+        // Services with valid staff get "pending" approval status
+        // Services without staff (Any Available) get "needs_assignment" status
+        approvalStatus: isValidStaffAssignment(service.staffId) ? "pending" : "needs_assignment",
+      }));
+    }
+    
+    // Determine initial status based on staff assignments:
+    // - ANY service has specific staff → AwaitingStaffApproval (those staff can respond)
+    // - ALL services are "Any Available" → Pending (goes to admin first)
+    // 
+    // Scenarios:
+    // A: All staff assigned → AwaitingStaffApproval → All staff notified
+    // B: John + Any Available → AwaitingStaffApproval → John notified + Admin notified for assignment
+    // C: All Any Available → Pending → Admin assigns all staff
+    const initialStatus = staffAnalysis.hasAnyAssignedStaff ? "AwaitingStaffApproval" : "Pending";
+    
     const payload: any = {
       ownerUid: String(body.ownerUid),
       client: String(body.client),
@@ -223,16 +343,17 @@ export async function POST(req: NextRequest) {
       notes: body.notes || null,
       serviceId: typeof body.serviceId === "number" ? body.serviceId : String(body.serviceId),
       serviceName: body.serviceName || null,
-      // Removed top-level staff assignment to rely on service-wise staff selection
+      staffId: body.staffId || null,
+      staffName: body.staffName || null,
       branchId: String(body.branchId),
       branchName: body.branchName || null,
       date: String(body.date),
       time: String(body.time),
       duration: Number(body.duration) || 0,
-      status: body.status || "Pending",
+      status: initialStatus,
       price: Number(body.price) || 0,
       customerUid: body.customerUid || null,
-      services: body.services || null,
+      services: processedServices,
       bookingSource: "booking_engine",
       bookingCode: bookingCode,
       createdAt: FieldValue.serverTimestamp(),
@@ -240,29 +361,31 @@ export async function POST(req: NextRequest) {
     };
     const ref = await db.collection("bookings").add(payload);
     
-    // Create notification for the customer
+    // Create notification for the customer (booking received)
     try {
-      const notificationPayload = {
+      const customerNotificationContent = getNotificationContent(
+        initialStatus,
+        bookingCode,
+        body.staffName || undefined,
+        body.serviceName || undefined,
+        body.date,
+        body.time,
+        body.services?.map(s => ({
+          name: s.name || "Service",
+          staffName: s.staffName || "Any Available"
+        }))
+      );
+      
+      const customerNotificationPayload = {
         customerUid: body.customerUid || null,
         customerEmail: body.clientEmail || null,
         customerPhone: body.clientPhone || null,
         bookingId: ref.id,
         bookingCode: bookingCode,
-        type: "booking_status_changed",
-        title: "Booking Request Received",
-        message: getNotificationContent(
-          "Pending",
-          bookingCode,
-          body.staffName || undefined,
-          body.serviceName || undefined,
-          body.date,
-          body.time,
-          body.services?.map(s => ({
-            name: s.name || "Service",
-            staffName: s.staffName || "Any Available"
-          }))
-        ).message,
-        status: "Pending",
+        type: customerNotificationContent.type,
+        title: customerNotificationContent.title,
+        message: customerNotificationContent.message,
+        status: initialStatus,
         read: false,
         ownerUid: String(body.ownerUid),
         // Additional details for better notification display
@@ -278,10 +401,109 @@ export async function POST(req: NextRequest) {
         createdAt: FieldValue.serverTimestamp(),
       };
       
-      await db.collection("notifications").add(notificationPayload);
+      await db.collection("notifications").add(customerNotificationPayload);
     } catch (notifError) {
       // Log error but don't fail the booking creation
-      console.error("Error creating notification:", notifError);
+      console.error("Error creating customer notification:", notifError);
+    }
+    
+    // Send notifications based on staff assignments
+    // - Notify assigned staff directly
+    // - If any services need assignment, notify admin too
+    
+    if (staffAnalysis.hasAnyAssignedStaff) {
+      // Send notifications to staff who have assignments
+      try {
+        const staffToNotify: Array<{ uid: string; name: string }> = [];
+        
+        // Collect staff members to notify from services
+        if (processedServices && Array.isArray(processedServices) && processedServices.length > 0) {
+          for (const svc of processedServices) {
+            if (isValidStaffAssignment(svc.staffId)) {
+              const existing = staffToNotify.find(s => s.uid === svc.staffId);
+              if (!existing) {
+                staffToNotify.push({ uid: svc.staffId!, name: svc.staffName || "Staff" });
+              }
+            }
+          }
+        } else if (isValidStaffAssignment(body.staffId)) {
+          // Single staff assignment
+          staffToNotify.push({ uid: body.staffId!, name: body.staffName || "Staff" });
+        }
+        
+        // Send notification to each staff member
+        for (const staff of staffToNotify) {
+          await createStaffAssignmentNotification(db, {
+            bookingId: ref.id,
+            bookingCode: bookingCode,
+            staffUid: staff.uid,
+            staffName: staff.name,
+            clientName: String(body.client),
+            clientPhone: body.clientPhone,
+            serviceName: body.serviceName,
+            services: processedServices?.map(s => ({
+              name: s.name || "Service",
+              staffName: s.staffName || undefined,
+              staffId: s.staffId || undefined,
+            })),
+            branchName: body.branchName,
+            bookingDate: String(body.date),
+            bookingTime: String(body.time),
+            duration: Number(body.duration),
+            price: Number(body.price),
+            ownerUid: String(body.ownerUid),
+          });
+        }
+        
+        console.log(`Booking ${bookingCode}: Sent notifications to ${staffToNotify.length} assigned staff member(s)`);
+      } catch (staffNotifError) {
+        console.error("Error creating staff notifications:", staffNotifError);
+      }
+    }
+    
+    // If any services need staff assignment, notify admin
+    if (staffAnalysis.hasAnyUnassignedStaff) {
+      try {
+        // Create admin notification for partial assignment needed
+        const unassignedServices = processedServices?.filter(s => !isValidStaffAssignment(s.staffId)) || [];
+        const unassignedServiceNames = unassignedServices.map(s => s.name || "Service").join(", ");
+        
+        const adminNotificationPayload = {
+          bookingId: ref.id,
+          bookingCode: bookingCode,
+          type: "booking_needs_assignment",
+          title: staffAnalysis.noneAssigned ? "New Booking - Staff Assignment Required" : "Booking - Partial Staff Assignment Required",
+          message: staffAnalysis.noneAssigned 
+            ? `New booking from ${body.client} for ${unassignedServiceNames} on ${body.date} at ${body.time}. Please assign staff to all services.`
+            : `Booking from ${body.client} needs staff assignment for: ${unassignedServiceNames}. Other services have been sent to assigned staff.`,
+          status: initialStatus,
+          ownerUid: String(body.ownerUid),
+          // Target admin/owner
+          targetRole: "admin",
+          clientName: String(body.client),
+          clientPhone: body.clientPhone || null,
+          serviceName: body.serviceName || null,
+          services: processedServices?.map(s => ({
+            name: s.name || "Service",
+            staffName: s.staffName || "Needs Assignment",
+            staffId: s.staffId || null,
+            needsAssignment: !isValidStaffAssignment(s.staffId),
+          })) || null,
+          branchName: body.branchName || null,
+          bookingDate: body.date || null,
+          bookingTime: body.time || null,
+          read: false,
+          createdAt: FieldValue.serverTimestamp(),
+        };
+        
+        await db.collection("notifications").add(adminNotificationPayload);
+        
+        console.log(`Booking ${bookingCode}: Admin notified - ${unassignedServices.length} service(s) need staff assignment`);
+      } catch (adminNotifError) {
+        console.error("Error creating admin notification:", adminNotifError);
+      }
+    } else {
+      console.log(`Booking ${bookingCode}: All services have assigned staff - no admin notification needed`);
     }
     
     return NextResponse.json({ id: ref.id, bookingCode: bookingCode });

@@ -18,7 +18,7 @@ export const BOOKING_STATUSES: BookingStatus[] = [
 ];
 
 // Per-service approval status for multi-service bookings
-export type ServiceApprovalStatus = "pending" | "accepted" | "rejected";
+export type ServiceApprovalStatus = "pending" | "accepted" | "rejected" | "needs_assignment";
 
 // Per-service completion status for tracking when staff finishes their work
 export type ServiceCompletionStatus = "pending" | "completed";
@@ -60,20 +60,45 @@ export function normalizeBookingStatus(value: string | null | undefined): Bookin
 }
 
 export function canTransitionStatus(current: BookingStatus, next: BookingStatus): boolean {
-  // Multi-service workflow:
-  // Pending -> AwaitingStaffApproval (admin confirms, sends to staff for review)
-  // Pending -> Canceled (admin cancels)
-  // AwaitingStaffApproval -> PartiallyApproved (some staff accept, waiting for others)
-  // AwaitingStaffApproval -> Confirmed (all staff accept - single service or all services)
-  // AwaitingStaffApproval -> StaffRejected (any staff rejects when there's a rejected service to handle)
-  // PartiallyApproved -> Confirmed (remaining staff accept)
-  // PartiallyApproved -> StaffRejected (any staff rejects - needs admin reassignment)
-  // PartiallyApproved -> Canceled (admin cancels)
-  // StaffRejected -> AwaitingStaffApproval (admin reassigns rejected service to new staff)
-  // StaffRejected -> PartiallyApproved (admin reassigns and some are still accepted)
-  // StaffRejected -> Canceled (admin cancels after rejection)
-  // Confirmed -> Completed (booking completed)
-  // Confirmed -> Canceled (admin cancels confirmed booking)
+  // Booking workflow with partial staff assignment support:
+  // 
+  // Scenario A: ALL services have specific staff assigned
+  //   → Status: AwaitingStaffApproval
+  //   → All assigned staff members receive notifications
+  //   → No admin action needed initially
+  // 
+  // Scenario B: SOME services have staff, SOME have "Any Available"
+  //   → Status: AwaitingStaffApproval (assigned staff can respond)
+  //   → Assigned staff receive notifications
+  //   → Admin also gets notification to assign staff for remaining services
+  //   → Services with staff have approvalStatus: "pending"
+  //   → Services without staff have approvalStatus: "needs_assignment"
+  // 
+  // Scenario C: ALL services have "Any Available" (no staff assigned)
+  //   → Status: Pending (goes to admin first)
+  //   → Admin assigns staff to all services
+  //   → Pending -> AwaitingStaffApproval (admin confirms, sends to staff)
+  //   → Pending -> Canceled (admin cancels)
+  // 
+  // Staff approval flow:
+  //   AwaitingStaffApproval -> PartiallyApproved (some staff accept, waiting for others)
+  //   AwaitingStaffApproval -> Confirmed (all staff accept - single service or all services)
+  //   AwaitingStaffApproval -> StaffRejected (any staff rejects when there's a rejected service to handle)
+  //   AwaitingStaffApproval -> Canceled (admin cancels)
+  // 
+  // Partial approval flow:
+  //   PartiallyApproved -> Confirmed (remaining staff accept)
+  //   PartiallyApproved -> StaffRejected (any staff rejects - needs admin reassignment)
+  //   PartiallyApproved -> Canceled (admin cancels)
+  // 
+  // Staff rejection flow (admin handles):
+  //   StaffRejected -> AwaitingStaffApproval (admin reassigns rejected service to new staff)
+  //   StaffRejected -> PartiallyApproved (admin reassigns and some are still accepted)
+  //   StaffRejected -> Canceled (admin cancels after rejection)
+  // 
+  // Completion flow:
+  //   Confirmed -> Completed (booking completed)
+  //   Confirmed -> Canceled (admin cancels confirmed booking)
   
   if (current === "Pending" && next === "AwaitingStaffApproval") return true;
   if (current === "Pending" && next === "Canceled") return true;
