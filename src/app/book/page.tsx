@@ -100,7 +100,7 @@ function BookPageContent() {
   const [salonPhone, setSalonPhone] = useState<string>("");
   const [salonAbn, setSalonAbn] = useState<string>("");
   const [salonLogo, setSalonLogo] = useState<string>("");
-  const [branches, setBranches] = useState<Array<{ id: string; name: string; address?: string; hours?: any }>>([]);
+  const [branches, setBranches] = useState<Array<{ id: string; name: string; address?: string; hours?: any; timezone?: string }>>([]);
   const [servicesList, setServicesList] = useState<Array<{ id: string | number; name: string; price?: number; duration?: number; icon?: string; branches?: string[]; staffIds?: string[] }>>([]);
   const [staffList, setStaffList] = useState<Array<{ id: string; name: string; role?: string; status?: string; avatar?: string; branchId?: string; branch?: string }>>([]);
   const [bookings, setBookings] = useState<Array<{ id: string; staffId?: string; date: string; time: string; duration: number; status: string; services?: Array<{ staffId?: string; time?: string; duration?: number }> }>>([]);
@@ -834,6 +834,7 @@ function BookPageContent() {
         staffName: mainStaffName,
         branchId: bkBranchId,
         branchName: selectedBranch?.name || "",
+        branchTimezone: selectedBranch?.timezone || "Australia/Sydney", // Include branch timezone
         date: formatLocalYmd(bkDate),
         time: earliestTime, // Use the earliest service time
         duration: totalDuration,

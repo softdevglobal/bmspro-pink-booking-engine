@@ -1,6 +1,7 @@
 import { db } from "@/lib/firebase";
 import { addDoc, collection, serverTimestamp, query, where, onSnapshot, DocumentData, getDocs } from "firebase/firestore";
 import type { BookingStatus } from "./bookingTypes";
+import { localToUTC } from "@/lib/timezone";
 
 /**
  * Generate a readable booking code
@@ -30,8 +31,10 @@ export type BookingInput = {
   staffName?: string;
   branchId: string;
   branchName?: string;
-  date: string; // YYYY-MM-DD
-  time: string; // HH:mm
+  branchTimezone?: string; // IANA timezone for the branch
+  date: string; // YYYY-MM-DD in branch's local timezone
+  time: string; // HH:mm in branch's local timezone
+  dateTimeUtc?: string; // ISO string in UTC for consistent storage
   duration: number; // minutes
   status?: BookingStatus;
   price: number;
@@ -50,6 +53,12 @@ export type BookingInput = {
 };
 
 export async function createBooking(input: BookingInput): Promise<{ id: string; bookingCode?: string }> {
+  // Convert local time to UTC if timezone is provided
+  let dateTimeUtc: string | undefined;
+  if (input.branchTimezone && input.date && input.time) {
+    dateTimeUtc = localToUTC(input.date, input.time, input.branchTimezone);
+  }
+  
   try {
     // Try API route first (uses Firebase Admin SDK, bypasses security rules)
     const res = await fetch("/api/booking-requests", {
@@ -69,8 +78,10 @@ export async function createBooking(input: BookingInput): Promise<{ id: string; 
         staffName: input.staffName || undefined,
         branchId: input.branchId,
         branchName: input.branchName || undefined,
+        branchTimezone: input.branchTimezone || undefined,
         date: input.date,
         time: input.time,
+        dateTimeUtc: dateTimeUtc || undefined,
         duration: input.duration,
         status: input.status || "Pending",
         price: input.price,
@@ -98,6 +109,8 @@ export async function createBooking(input: BookingInput): Promise<{ id: string; 
       notes: input.notes || null,
       serviceId: typeof input.serviceId === "number" ? input.serviceId : String(input.serviceId),
       serviceName: input.serviceName || null,
+      branchTimezone: input.branchTimezone || null,
+      dateTimeUtc: dateTimeUtc || null,
       staffId: input.staffId || null,
       staffName: input.staffName || null,
       branchId: String(input.branchId),
