@@ -130,10 +130,10 @@ export const RateLimiters = {
     identifier: "booking",
   } as RateLimitConfig,
   
-  /** Rate limit for auth attempts: 5 attempts per 15 minutes per IP */
+  /** Rate limit for auth attempts: 10 attempts per 10 minutes per IP */
   auth: {
-    maxRequests: 5,
-    windowMs: 15 * 60 * 1000, // 15 minutes
+    maxRequests: 10,
+    windowMs: 10 * 60 * 1000, // 10 minutes
     identifier: "auth",
   } as RateLimitConfig,
   
@@ -144,10 +144,10 @@ export const RateLimiters = {
     identifier: "general",
   } as RateLimitConfig,
   
-  /** Rate limit for registration: 3 registrations per hour per IP */
+  /** Rate limit for registration: 10 registrations per 10 minutes per IP */
   registration: {
-    maxRequests: 3,
-    windowMs: 60 * 60 * 1000, // 1 hour
+    maxRequests: 10,
+    windowMs: 10 * 60 * 1000, // 10 minutes
     identifier: "registration",
   } as RateLimitConfig,
 };
