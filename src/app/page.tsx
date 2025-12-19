@@ -6,7 +6,7 @@ import { Suspense } from "react";
 
 function HomeContent() {
   const searchParams = useSearchParams();
-  const DEFAULT_OWNER_UID = "jTMkwcRk9PPqYFrxZmGmK77HsYy1";
+  const DEFAULT_OWNER_UID = process.env.NEXT_PUBLIC_DEFAULT_OWNER_UID || "";
   const ownerUid = searchParams.get("ownerUid") || DEFAULT_OWNER_UID;
 
   return (

@@ -13,7 +13,7 @@ import { getCurrentDateTimeInTimezone } from "@/lib/timezone";
 function BookPageContent() {
   const searchParams = useSearchParams();
   const router = useRouter();
-  const DEFAULT_OWNER_UID = "jTMkwcRk9PPqYFrxZmGmK77HsYy1";
+  const DEFAULT_OWNER_UID = process.env.NEXT_PUBLIC_DEFAULT_OWNER_UID || "";
   const ownerUid = searchParams.get("ownerUid") || DEFAULT_OWNER_UID;
 
   // Authentication state
