@@ -8,6 +8,7 @@ import { auth, db } from "@/lib/firebase";
 import { signInWithCustomToken, onAuthStateChanged, signOut } from "firebase/auth";
 import { createCustomerDocument, incrementCustomerBookings } from "@/lib/customers";
 import NotificationPanel from "@/components/NotificationPanel";
+import { getCurrentDateTimeInTimezone } from "@/lib/timezone";
 
 function BookPageContent() {
   const searchParams = useSearchParams();
@@ -87,6 +88,9 @@ function BookPageContent() {
   const [submittingBooking, setSubmittingBooking] = useState<boolean>(false);
   const [showSuccess, setShowSuccess] = useState<boolean>(false);
   const [bookingCode, setBookingCode] = useState<string>("");
+  
+  // Branch timezone time - refreshes every minute to keep time slots accurate
+  const [branchCurrentTime, setBranchCurrentTime] = useState<{ date: string; time: string }>({ date: '', time: '' });
 
   // Terms and conditions
   const [agreedToTerms, setAgreedToTerms] = useState<boolean>(false);
@@ -286,6 +290,27 @@ function BookPageContent() {
     
     return () => unsub();
   }, [ownerUid, bkDate]);
+
+  // Update branch current time every minute for accurate slot availability
+  useEffect(() => {
+    if (!bkBranchId) return;
+    
+    const selectedBranch = branches.find((b) => b.id === bkBranchId);
+    const branchTimezone = selectedBranch?.timezone || 'Australia/Sydney';
+    
+    // Update immediately
+    const updateTime = () => {
+      const branchTime = getCurrentDateTimeInTimezone(branchTimezone);
+      setBranchCurrentTime({ date: branchTime.date, time: branchTime.time });
+    };
+    
+    updateTime();
+    
+    // Update every minute
+    const interval = setInterval(updateTime, 60000);
+    
+    return () => clearInterval(interval);
+  }, [bkBranchId, branches]);
 
   const formatLocalYmd = (date: Date): string => {
     const year = date.getFullYear();
@@ -522,13 +547,24 @@ function BookPageContent() {
 
     const slots: Array<{ time: string; available: boolean; reason?: string }> = [];
     
-    // Check if date is today to filter past times
-    const today = new Date();
-    today.setHours(0, 0, 0, 0);
-    const selectedDateOnly = new Date(bkDate);
-    selectedDateOnly.setHours(0, 0, 0, 0);
-    const isToday = selectedDateOnly.getTime() === today.getTime();
-    const currentMinutes = isToday ? (new Date().getHours() * 60 + new Date().getMinutes()) : -1;
+    // Get the branch's timezone (default to Australia/Sydney if not set)
+    const branchTimezone = selectedBranch?.timezone || 'Australia/Sydney';
+    
+    // Get current date and time in the BRANCH's timezone (not user's local time)
+    // This ensures that if user is in Sri Lanka but branch is in Perth,
+    // we use Perth's current time to determine which slots have passed
+    const branchNow = getCurrentDateTimeInTimezone(branchTimezone);
+    const branchTodayDate = branchNow.date; // YYYY-MM-DD in branch timezone
+    const branchNowTime = branchNow.time; // HH:mm in branch timezone
+    
+    // Check if selected date is today IN THE BRANCH'S TIMEZONE
+    const selectedDateStr = formatLocalYmd(bkDate);
+    const isToday = selectedDateStr === branchTodayDate;
+    
+    // Calculate current minutes based on branch's local time
+    const currentMinutes = isToday 
+      ? parseInt(branchNowTime.split(':')[0]) * 60 + parseInt(branchNowTime.split(':')[1])
+      : -1;
 
     // Get the staff member selected for this service
     const staffIdForService = forServiceId ? bkServiceStaff[String(forServiceId)] : null;
@@ -1349,6 +1385,15 @@ function BookPageContent() {
                                 <div className="flex-1 min-w-0">
                           <div className="font-semibold text-gray-800 text-sm sm:text-base truncate">{branch.name}</div>
                           <div className="text-xs sm:text-sm text-gray-500 truncate">{branch.address}</div>
+                          {/* Show timezone for the branch */}
+                          {branch.timezone && (
+                            <div className="flex items-center gap-1 mt-1">
+                              <i className={`fas fa-globe text-[10px] ${bkBranchId === branch.id ? "text-pink-500" : "text-gray-400"}`}></i>
+                              <span className={`text-[10px] sm:text-xs ${bkBranchId === branch.id ? "text-pink-600" : "text-gray-400"}`}>
+                                {branch.timezone.split('/').pop()?.replace(/_/g, ' ')}
+                              </span>
+                            </div>
+                          )}
                                   </div>
                         {bkBranchId === branch.id && (
                           <i className="fas fa-check-circle text-pink-600 text-lg sm:text-xl flex-shrink-0"></i>
@@ -1485,9 +1530,18 @@ function BookPageContent() {
                       {buildMonthCells().map((cell, idx) => {
                         const isSelected = cell.date && bkDate && 
                           cell.date.getTime() === bkDate.getTime();
-                          const today = new Date();
-                          today.setHours(0, 0, 0, 0);
-                        const isPast = cell.date && cell.date < today;
+                        
+                        // Use branch timezone to determine "today" and past dates
+                        const selectedBranch = branches.find((b) => b.id === bkBranchId);
+                        const branchTimezone = selectedBranch?.timezone || 'Australia/Sydney';
+                        const branchCurrentDate = getCurrentDateTimeInTimezone(branchTimezone).date;
+                        
+                        // Compare cell date with branch's current date
+                        let isPast = false;
+                        if (cell.date) {
+                          const cellDateStr = formatLocalYmd(cell.date);
+                          isPast = cellDateStr < branchCurrentDate;
+                        }
 
                           return (
                           <button
@@ -1516,6 +1570,39 @@ function BookPageContent() {
                     <i className="fas fa-clock text-purple-600 text-base sm:text-lg"></i>
                     <span className="text-sm sm:text-xl">Select Staff & Time for Each Service</span>
                   </h3>
+                  
+                  {/* Branch Timezone Indicator */}
+                  {bkBranchId && (() => {
+                    const selectedBranch = branches.find((b) => b.id === bkBranchId);
+                    const branchTimezone = selectedBranch?.timezone || 'Australia/Sydney';
+                    
+                    // Get timezone display name
+                    const tzLabel = branchTimezone.split('/').pop()?.replace(/_/g, ' ') || branchTimezone;
+                    
+                    return (
+                      <div className="mb-4 p-3 bg-gradient-to-r from-blue-50 to-indigo-50 rounded-lg border border-blue-200">
+                        <div className="flex items-center justify-between flex-wrap gap-2">
+                          <div className="flex items-center gap-2">
+                            <i className="fas fa-globe text-blue-600"></i>
+                            <span className="text-xs sm:text-sm font-medium text-blue-800">
+                              Branch Time Zone: <span className="font-bold">{tzLabel}</span>
+                            </span>
+                          </div>
+                          <div className="flex items-center gap-2 bg-white px-3 py-1 rounded-full border border-blue-200">
+                            <i className="fas fa-clock text-blue-500 text-xs"></i>
+                            <span className="text-xs sm:text-sm font-bold text-blue-700">
+                              Current Time: {branchCurrentTime.time || '--:--'}
+                            </span>
+                          </div>
+                        </div>
+                        <p className="text-[10px] sm:text-xs text-blue-600 mt-2">
+                          <i className="fas fa-info-circle mr-1"></i>
+                          Times shown are in the branch's local timezone. Past slots are automatically hidden.
+                        </p>
+                      </div>
+                    );
+                  })()}
+                  
                   {!bkDate ? (
                     <div className="bg-gradient-to-br from-purple-50 to-pink-50 rounded-lg sm:rounded-xl p-4 text-center py-8 sm:py-12">
                       <i className="fas fa-calendar-day text-3xl sm:text-4xl text-gray-300 mb-2"></i>
