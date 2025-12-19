@@ -4,6 +4,8 @@ import { FieldValue } from "firebase-admin/firestore";
 import { generateBookingCode } from "@/lib/bookings";
 import { getNotificationContent } from "@/lib/notifications";
 import { shouldBlockSlots } from "@/lib/bookingTypes";
+import { checkRateLimit, getClientIdentifier, RateLimiters } from "@/lib/rateLimiter";
+import { validateOwnerUid } from "@/lib/ownerValidation";
 
 /**
  * Check if a staff ID is a valid assigned staff (not "Any Available" or empty)
@@ -133,6 +135,27 @@ type CreateBookingRequestInput = {
 
 export async function POST(req: NextRequest) {
   try {
+    // Security: Rate limiting to prevent booking spam
+    const clientId = getClientIdentifier(req);
+    const rateLimitResult = checkRateLimit(clientId, RateLimiters.booking);
+    
+    if (!rateLimitResult.success) {
+      return NextResponse.json(
+        { 
+          error: "Too many booking requests. Please try again later.",
+          retryAfter: rateLimitResult.retryAfter,
+        },
+        { 
+          status: 429,
+          headers: {
+            "Retry-After": String(rateLimitResult.retryAfter),
+            "X-RateLimit-Remaining": "0",
+            "X-RateLimit-Reset": String(rateLimitResult.resetTime),
+          },
+        }
+      );
+    }
+
     // Security: Limit request size to prevent DoS attacks (CVE-2025-55184)
     const contentLength = req.headers.get("content-length");
     if (contentLength && parseInt(contentLength) > 1024 * 1024) { // 1MB limit
@@ -144,6 +167,15 @@ export async function POST(req: NextRequest) {
     // Basic validation
     if (!body.ownerUid) {
       return NextResponse.json({ error: "Missing field: ownerUid" }, { status: 400 });
+    }
+
+    // Security: Validate that ownerUid is a valid, active salon owner
+    const ownerValidation = await validateOwnerUid(body.ownerUid);
+    if (!ownerValidation.valid) {
+      return NextResponse.json(
+        { error: ownerValidation.error || "Invalid salon" },
+        { status: 404 }
+      );
     }
     if (!body.client || !body.client.trim()) {
       return NextResponse.json({ error: "Missing field: client" }, { status: 400 });

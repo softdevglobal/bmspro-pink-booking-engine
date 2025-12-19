@@ -1,53 +1,91 @@
 import { NextRequest, NextResponse } from "next/server";
 import { adminDb } from "@/lib/firebaseAdmin";
+import { verifyAuth } from "@/lib/authHelpers";
 
 export const runtime = "nodejs";
 
 /**
  * GET /api/notifications
- * Fetch notifications for a customer by email, phone, or customerUid
+ * Fetch notifications for the authenticated customer
+ * 
+ * Security: Requires authentication. Users can only fetch their own notifications.
+ * The customerUid is derived from the authenticated token, not from query params.
  */
 export async function GET(req: NextRequest) {
   try {
-    const { searchParams } = new URL(req.url);
-    const customerEmail = searchParams.get("email");
-    const customerPhone = searchParams.get("phone");
-    const customerUid = searchParams.get("uid");
-    const limitCount = parseInt(searchParams.get("limit") || "200");
-
-    if (!customerEmail && !customerPhone && !customerUid) {
+    // Verify authentication
+    const authResult = await verifyAuth(req);
+    if (!authResult.success) {
       return NextResponse.json(
-        { error: "At least one of email, phone, or uid is required" },
-        { status: 400 }
+        { error: authResult.error },
+        { status: authResult.status }
       );
     }
 
-    const db = adminDb();
-    let query: any = db.collection("notifications");
+    const authenticatedUserId = authResult.user.uid;
+    const authenticatedEmail = authResult.user.email;
+    
+    const { searchParams } = new URL(req.url);
+    const limitCount = parseInt(searchParams.get("limit") || "200");
 
-    // Build query based on available parameters
-    if (customerUid) {
-      query = query.where("customerUid", "==", customerUid);
-    } else if (customerEmail) {
-      query = query.where("customerEmail", "==", customerEmail);
-    } else if (customerPhone) {
-      query = query.where("customerPhone", "==", customerPhone);
+    const db = adminDb();
+    
+    // Build queries for notifications that belong to this user
+    // A notification belongs to the user if:
+    // 1. customerUid matches (for customer notifications)
+    // 2. staffUid matches (for staff notifications) 
+    // 3. ownerUid matches (for owner notifications)
+    // 4. targetAdminUid matches (for admin notifications)
+    
+    // We need to run multiple queries since Firestore doesn't support OR in where clauses
+    const queries = [
+      // Customer notifications (by UID)
+      db.collection("notifications")
+        .where("customerUid", "==", authenticatedUserId)
+        .orderBy("createdAt", "desc")
+        .limit(limitCount),
+    ];
+    
+    // Also check by email if available (for backwards compatibility with older notifications)
+    if (authenticatedEmail) {
+      queries.push(
+        db.collection("notifications")
+          .where("customerEmail", "==", authenticatedEmail)
+          .orderBy("createdAt", "desc")
+          .limit(limitCount)
+      );
     }
 
-    const snapshot = await query
-      .orderBy("createdAt", "desc")
-      .limit(limitCount)
-      .get();
+    // Execute all queries in parallel
+    const snapshots = await Promise.all(
+      queries.map(q => q.get().catch(() => ({ docs: [] })))
+    );
 
-    const notifications = snapshot.docs.map((doc: any) => {
-      const data = doc.data();
-      return {
-        id: doc.id,
-        ...data,
-        // Convert Firestore Timestamp to serializable format
-        createdAt: data.createdAt?.toDate?.()?.toISOString() || data.createdAt,
-      };
-    });
+    // Merge results and remove duplicates
+    const notificationMap = new Map<string, any>();
+    
+    for (const snapshot of snapshots) {
+      for (const doc of snapshot.docs) {
+        if (!notificationMap.has(doc.id)) {
+          const data = doc.data();
+          notificationMap.set(doc.id, {
+            id: doc.id,
+            ...data,
+            // Convert Firestore Timestamp to serializable format
+            createdAt: data.createdAt?.toDate?.()?.toISOString() || data.createdAt,
+          });
+        }
+      }
+    }
+
+    // Convert to array and sort by createdAt descending
+    const notifications = Array.from(notificationMap.values())
+      .sort((a, b) => {
+        const dateA = new Date(a.createdAt || 0).getTime();
+        const dateB = new Date(b.createdAt || 0).getTime();
+        return dateB - dateA;
+      })
+      .slice(0, limitCount);
 
     return NextResponse.json({ notifications });
   } catch (error: any) {
@@ -59,4 +97,3 @@ export async function GET(req: NextRequest) {
     return NextResponse.json({ error: message }, { status: 500 });
   }
 }
-

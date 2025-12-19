@@ -36,25 +36,45 @@ function BookPageContent() {
   const [showNotificationPanel, setShowNotificationPanel] = useState<boolean>(false);
   const [unreadNotificationCount, setUnreadNotificationCount] = useState<number>(0);
 
+  /**
+   * Get the Firebase ID token for authenticated API requests
+   */
+  const getAuthToken = async (): Promise<string | null> => {
+    try {
+      const user = auth.currentUser;
+      if (!user) {
+        return null;
+      }
+      const token = await user.getIdToken();
+      return token;
+    } catch (error) {
+      console.error("Error getting auth token:", error);
+      return null;
+    }
+  };
+
   // Fetch unread notification count
   useEffect(() => {
     const fetchUnreadCount = async () => {
       if (!isAuthenticated || !currentCustomer) return;
 
       try {
-        const params = new URLSearchParams();
-        if (currentCustomer.uid) {
-          params.set("uid", currentCustomer.uid);
-        } else if (currentCustomer.email) {
-          params.set("email", currentCustomer.email);
-        } else if (currentCustomer.phone) {
-          params.set("phone", currentCustomer.phone);
-        } else {
+        // Get auth token for secure API access
+        const token = await getAuthToken();
+        if (!token) {
           return;
         }
+
+        const params = new URLSearchParams();
         params.set("limit", "50");
 
-        const response = await fetch(`/api/notifications?${params.toString()}`);
+        const response = await fetch(`/api/notifications?${params.toString()}`, {
+          method: "GET",
+          headers: {
+            "Authorization": `Bearer ${token}`,
+            "Content-Type": "application/json",
+          },
+        });
         const data = await response.json();
 
         if (response.ok && Array.isArray(data.notifications)) {
@@ -2275,12 +2295,21 @@ function BookPageContent() {
             if (currentCustomer) {
               const fetchCount = async () => {
                 try {
+                  // Get auth token for secure API access
+                  const token = await getAuthToken();
+                  if (!token) {
+                    return;
+                  }
+
                   const params = new URLSearchParams();
-                  if (currentCustomer.uid) params.set("uid", currentCustomer.uid);
-                  else if (currentCustomer.email) params.set("email", currentCustomer.email);
-                  else if (currentCustomer.phone) params.set("phone", currentCustomer.phone);
                   params.set("limit", "50");
-                  const response = await fetch(`/api/notifications?${params.toString()}`);
+                  const response = await fetch(`/api/notifications?${params.toString()}`, {
+                    method: "GET",
+                    headers: {
+                      "Authorization": `Bearer ${token}`,
+                      "Content-Type": "application/json",
+                    },
+                  });
                   const data = await response.json();
                   if (response.ok && Array.isArray(data.notifications)) {
                     setUnreadNotificationCount(data.notifications.filter((n: any) => !n.read).length);

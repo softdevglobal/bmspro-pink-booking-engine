@@ -2,6 +2,7 @@
 
 import { useState, useEffect } from "react";
 import { Notification } from "@/lib/notifications";
+import { auth } from "@/lib/firebase";
 
 interface NotificationPanelProps {
   isOpen: boolean;
@@ -32,23 +33,49 @@ export default function NotificationPanel({
     }
   }, [isOpen, customerEmail, customerPhone, customerUid]);
 
+  /**
+   * Get the Firebase ID token for authenticated API requests
+   */
+  const getAuthToken = async (): Promise<string | null> => {
+    try {
+      const user = auth.currentUser;
+      if (!user) {
+        console.warn("No authenticated user found");
+        return null;
+      }
+      const token = await user.getIdToken();
+      return token;
+    } catch (error) {
+      console.error("Error getting auth token:", error);
+      return null;
+    }
+  };
+
   const fetchNotifications = async () => {
     setLoading(true);
     setError("");
 
     try {
-      const params = new URLSearchParams();
-      if (customerUid) {
-        params.set("uid", customerUid);
-      } else if (customerEmail) {
-        params.set("email", customerEmail);
-      } else if (customerPhone) {
-        params.set("phone", customerPhone);
+      // Get auth token for secure API access
+      const token = await getAuthToken();
+      if (!token) {
+        setError("Please sign in to view notifications");
+        setNotifications([]);
+        setLoading(false);
+        return;
       }
+
+      const params = new URLSearchParams();
       // Fetch up to 200 notifications
       params.set("limit", "200");
 
-      const response = await fetch(`/api/notifications?${params.toString()}`);
+      const response = await fetch(`/api/notifications?${params.toString()}`, {
+        method: "GET",
+        headers: {
+          "Authorization": `Bearer ${token}`,
+          "Content-Type": "application/json",
+        },
+      });
       const data = await response.json();
 
       if (!response.ok) {
@@ -66,8 +93,19 @@ export default function NotificationPanel({
 
   const markAsRead = async (notificationId: string) => {
     try {
+      // Get auth token for secure API access
+      const token = await getAuthToken();
+      if (!token) {
+        console.error("No auth token available");
+        return;
+      }
+
       const response = await fetch(`/api/notifications/${notificationId}/read`, {
         method: "PATCH",
+        headers: {
+          "Authorization": `Bearer ${token}`,
+          "Content-Type": "application/json",
+        },
       });
 
       if (response.ok) {
@@ -98,8 +136,18 @@ export default function NotificationPanel({
 
     setDeleting(true);
     try {
+      // Get auth token for secure API access
+      const token = await getAuthToken();
+      if (!token) {
+        throw new Error("Authentication required");
+      }
+
       const response = await fetch(`/api/notifications/${notificationToDelete}`, {
         method: "DELETE",
+        headers: {
+          "Authorization": `Bearer ${token}`,
+          "Content-Type": "application/json",
+        },
       });
 
       if (response.ok) {
@@ -586,4 +634,3 @@ export default function NotificationPanel({
     </>
   );
 }
-
