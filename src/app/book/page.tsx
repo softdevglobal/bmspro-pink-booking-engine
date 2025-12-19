@@ -132,6 +132,8 @@ function BookPageContent() {
 
   // Check authentication status
   useEffect(() => {
+    if (!ownerUid) return; // Wait for ownerUid to be available
+    
     const unsubscribe = onAuthStateChanged(auth, async (user) => {
       if (user) {
         // Check if user is an admin
@@ -162,50 +164,57 @@ function BookPageContent() {
           console.log("User not in admin users collection, proceeding as customer");
         }
         
-        setIsAuthenticated(true);
-        
-        // Fetch customer details
+        // Check if customer is registered for THIS specific salon
+        // Structure: owners/{ownerUid}/customers/{customerUid}
         try {
           const { doc, getDoc } = await import("firebase/firestore");
-          const customerRef = doc(db, "customers", user.uid);
+          const customerRef = doc(db, "owners", ownerUid, "customers", user.uid);
           const customerSnap = await getDoc(customerRef);
           
-          const customerData = customerSnap.exists() 
-            ? {
-              uid: user.uid,
-                email: customerSnap.data().email || user.email || "",
-                fullName: customerSnap.data().fullName || user.displayName || "",
-                phone: customerSnap.data().phone || customerSnap.data().phoneNumber || "",
-              }
-            : {
-              uid: user.uid,
-              email: user.email || "",
-              fullName: user.displayName || "",
-              phone: "",
-              };
-          
-          setCurrentCustomer(customerData);
-          
-          // Save to localStorage
-          if (typeof window !== "undefined") {
-            localStorage.setItem("customerAuth", JSON.stringify(customerData));
+          if (!customerSnap.exists()) {
+            // User is authenticated in Firebase Auth but NOT registered for this salon
+            await signOut(auth);
+            setAuthError("You are not registered for this salon. Please create an account first.");
+            setAuthMode("register");
+            setIsAuthenticated(false);
+            setCurrentCustomer(null);
+            setShowAuthModal(true);
+            // Clear localStorage
+            if (typeof window !== "undefined") {
+              localStorage.removeItem("customerAuth");
+            }
+            return;
           }
-        } catch (error: any) {
+          
+          // Customer is registered for this salon
+          setIsAuthenticated(true);
+          
           const customerData = {
             uid: user.uid,
-            email: user.email,
-            fullName: user.displayName,
-            phone: "",
+            email: customerSnap.data().email || user.email || "",
+            fullName: customerSnap.data().fullName || user.displayName || "",
+            phone: customerSnap.data().phone || customerSnap.data().phoneNumber || "",
           };
+          
           setCurrentCustomer(customerData);
           
-          // Save to localStorage
+          // Save to localStorage with salon context
           if (typeof window !== "undefined") {
-            localStorage.setItem("customerAuth", JSON.stringify(customerData));
+            localStorage.setItem("customerAuth", JSON.stringify({
+              ...customerData,
+              ownerUid: ownerUid, // Store which salon this auth is for
+            }));
           }
+          
+          setShowAuthModal(false);
+        } catch (error: any) {
+          console.error("Error checking salon customer:", error);
+          // On error, sign out to be safe
+          await signOut(auth);
+          setIsAuthenticated(false);
+          setCurrentCustomer(null);
+          setShowAuthModal(true);
         }
-        
-        setShowAuthModal(false);
       } else {
         setIsAuthenticated(false);
         setCurrentCustomer(null);
@@ -218,16 +227,17 @@ function BookPageContent() {
     });
 
     return () => unsubscribe();
-  }, []);
+  }, [ownerUid]);
 
   // Refresh customer data from Firestore when authenticated to ensure phone number is loaded
   useEffect(() => {
     const refreshCustomerData = async () => {
-      if (!isAuthenticated || !currentCustomer?.uid) return;
+      if (!isAuthenticated || !currentCustomer?.uid || !ownerUid) return;
       
       try {
         const { doc, getDoc } = await import("firebase/firestore");
-        const customerRef = doc(db, "customers", currentCustomer.uid);
+        // Use salon-specific customer collection: owners/{ownerUid}/customers/{uid}
+        const customerRef = doc(db, "owners", ownerUid, "customers", currentCustomer.uid);
         const customerSnap = await getDoc(customerRef);
         
         if (customerSnap.exists()) {
@@ -364,6 +374,7 @@ function BookPageContent() {
           password: authPassword,
           fullName: authFullName,
           phone: authPhone,
+          ownerUid: ownerUid, // Salon-specific registration
         }),
       });
 
@@ -399,14 +410,39 @@ function BookPageContent() {
       const { signInWithEmailAndPassword } = await import("firebase/auth");
       const userCredential = await signInWithEmailAndPassword(auth, authEmail, authPassword);
       
-      // User is now signed in
+      // Verify customer is registered for this specific salon
+      const verifyResponse = await fetch("/api/auth/login", {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({
+          email: authEmail,
+          ownerUid: ownerUid, // Salon-specific verification
+        }),
+      });
+      
+      const verifyData = await verifyResponse.json();
+      
+      if (!verifyResponse.ok) {
+        // Sign out from Firebase Auth since they're not registered for this salon
+        await signOut(auth);
+        
+        if (verifyData.needsRegistration) {
+          setAuthError("You are not registered for this salon. Please create an account first.");
+          setAuthMode("register"); // Switch to register mode
+        } else {
+          throw new Error(verifyData.error || "Verification failed");
+        }
+        return;
+      }
+      
+      // User is verified for this salon
       setIsAuthenticated(true);
       
       const customerData = {
         uid: userCredential.user.uid,
-        email: userCredential.user.email || "",
-        fullName: userCredential.user.displayName || "",
-        phone: "",
+        email: verifyData.customer?.email || userCredential.user.email || "",
+        fullName: verifyData.customer?.fullName || userCredential.user.displayName || "",
+        phone: verifyData.customer?.phone || "",
       };
       
       setCurrentCustomer(customerData);
@@ -926,7 +962,7 @@ function BookPageContent() {
         services: servicesWithTimes, // Already sorted by time
       });
       
-      await incrementCustomerBookings(currentCustomer.uid);
+      await incrementCustomerBookings(ownerUid, currentCustomer.uid);
       
       setBookingCode(result.bookingCode || "");
       setShowSuccess(true);

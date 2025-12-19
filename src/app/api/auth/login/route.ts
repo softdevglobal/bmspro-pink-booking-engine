@@ -3,6 +3,7 @@ import { adminDb } from "@/lib/firebaseAdmin";
 import { getAuth } from "firebase-admin/auth";
 import { getAdminApp } from "@/lib/firebaseAdmin";
 import { checkRateLimit, getClientIdentifier, RateLimiters } from "@/lib/rateLimiter";
+import { validateOwnerUid } from "@/lib/ownerValidation";
 
 export async function POST(request: NextRequest) {
   try {
@@ -34,12 +35,29 @@ export async function POST(request: NextRequest) {
     }
 
     const body = await request.json();
-    const { email, password } = body;
+    const { email, ownerUid } = body;
+
+    // Validate ownerUid - required for salon-specific login verification
+    if (!ownerUid) {
+      return NextResponse.json(
+        { error: "Salon identifier is required" },
+        { status: 400 }
+      );
+    }
+
+    // Validate the owner exists and is active
+    const ownerValidation = await validateOwnerUid(ownerUid);
+    if (!ownerValidation.valid) {
+      return NextResponse.json(
+        { error: ownerValidation.error || "Invalid salon" },
+        { status: 400 }
+      );
+    }
 
     // Validate input
-    if (!email || !password) {
+    if (!email) {
       return NextResponse.json(
-        { error: "Email and password are required" },
+        { error: "Email is required" },
         { status: 400 }
       );
     }
@@ -58,14 +76,19 @@ export async function POST(request: NextRequest) {
       const auth = getAuth(getAdminApp());
       const userRecord = await auth.getUserByEmail(email);
 
-      // Check if customer document exists in Firestore
+      // Check if customer is registered for THIS specific salon
+      // Structure: owners/{ownerUid}/customers/{customerUid}
       const db = adminDb();
-      const customerRef = db.collection("customers").doc(userRecord.uid);
+      const customerRef = db.collection("owners").doc(ownerUid).collection("customers").doc(userRecord.uid);
       const customerDoc = await customerRef.get();
 
       if (!customerDoc.exists) {
+        // User exists in Firebase Auth but not registered for this salon
         return NextResponse.json(
-          { error: "Customer account not found" },
+          { 
+            error: "You are not registered for this salon. Please create an account first.",
+            needsRegistration: true 
+          },
           { status: 404 }
         );
       }

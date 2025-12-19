@@ -3,6 +3,7 @@ import { adminDb } from "@/lib/firebaseAdmin";
 import { getAuth } from "firebase-admin/auth";
 import { getAdminApp } from "@/lib/firebaseAdmin";
 import { checkRateLimit, getClientIdentifier, RateLimiters } from "@/lib/rateLimiter";
+import { validateOwnerUid } from "@/lib/ownerValidation";
 
 export async function POST(request: NextRequest) {
   try {
@@ -34,7 +35,24 @@ export async function POST(request: NextRequest) {
     }
 
     const body = await request.json();
-    const { email, password, fullName, phone } = body;
+    const { email, password, fullName, phone, ownerUid } = body;
+
+    // Validate ownerUid - required for salon-specific registration
+    if (!ownerUid) {
+      return NextResponse.json(
+        { error: "Salon identifier is required" },
+        { status: 400 }
+      );
+    }
+
+    // Validate the owner exists and is active
+    const ownerValidation = await validateOwnerUid(ownerUid);
+    if (!ownerValidation.valid) {
+      return NextResponse.json(
+        { error: ownerValidation.error || "Invalid salon" },
+        { status: 400 }
+      );
+    }
 
     // Validate input
     if (!email || !password || !fullName) {
@@ -81,49 +99,73 @@ export async function POST(request: NextRequest) {
       }
     }
 
+    const db = adminDb();
+    const auth = getAuth(getAdminApp());
+    let userRecord;
+    let isExistingUser = false;
+
     try {
-      // Create Firebase Auth user
-      const auth = getAuth(getAdminApp());
-      const userRecord = await auth.createUser({
-        email,
-        password,
-        displayName: trimmedName,
-      });
-
-      // Create customer document in Firestore
-      const db = adminDb();
-      const customerRef = db.collection("customers").doc(userRecord.uid);
+      // Check if user already exists in Firebase Auth
+      userRecord = await auth.getUserByEmail(email);
+      isExistingUser = true;
       
-      await customerRef.set({
-        uid: userRecord.uid,
-        email: email,
-        fullName: trimmedName,
-        phone: sanitizedPhone,
-        createdAt: new Date().toISOString(),
-        updatedAt: new Date().toISOString(),
-        totalBookings: 0,
-      });
-
-      return NextResponse.json(
-        {
-          success: true,
-          message: "Customer account created successfully",
-          uid: userRecord.uid,
-        },
-        { status: 201 }
-      );
-    } catch (authError: any) {
-      console.error("Firebase Auth error:", authError);
+      // User exists - check if they're already registered for this salon
+      const existingCustomerRef = db.collection("owners").doc(ownerUid).collection("customers").doc(userRecord.uid);
+      const existingCustomer = await existingCustomerRef.get();
       
-      if (authError.code === "auth/email-already-exists") {
+      if (existingCustomer.exists) {
         return NextResponse.json(
-          { error: "An account with this email already exists" },
+          { error: "You are already registered for this salon. Please login instead." },
           { status: 409 }
         );
       }
       
-      throw authError;
+      // User exists in Firebase Auth but not registered for this salon
+      // We'll create a salon-specific customer record below
+    } catch (authError: any) {
+      if (authError.code === "auth/user-not-found") {
+        // User doesn't exist - create new Firebase Auth user
+        try {
+          userRecord = await auth.createUser({
+            email,
+            password,
+            displayName: trimmedName,
+          });
+        } catch (createError: any) {
+          console.error("Firebase Auth create error:", createError);
+          throw createError;
+        }
+      } else {
+        throw authError;
+      }
     }
+
+    // Create salon-specific customer document in Firestore
+    // Structure: owners/{ownerUid}/customers/{customerUid}
+    const customerRef = db.collection("owners").doc(ownerUid).collection("customers").doc(userRecord.uid);
+    
+    await customerRef.set({
+      uid: userRecord.uid,
+      email: email,
+      fullName: trimmedName,
+      phone: sanitizedPhone,
+      ownerUid: ownerUid,
+      createdAt: new Date().toISOString(),
+      updatedAt: new Date().toISOString(),
+      totalBookings: 0,
+    });
+
+    return NextResponse.json(
+      {
+        success: true,
+        message: isExistingUser 
+          ? "Successfully registered for this salon" 
+          : "Customer account created successfully",
+        uid: userRecord.uid,
+        isExistingUser,
+      },
+      { status: 201 }
+    );
   } catch (error: any) {
     console.error("Registration error:", error);
     return NextResponse.json(

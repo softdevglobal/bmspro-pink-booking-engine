@@ -16,7 +16,7 @@ export type Customer = {
   email: string;
   fullName: string;
   phone?: string;
-  ownerUid?: string; // For linking to salon owner if needed
+  ownerUid: string; // Required - links customer to specific salon
   createdAt: any;
   updatedAt: any;
   totalBookings?: number;
@@ -24,17 +24,23 @@ export type Customer = {
 };
 
 /**
- * Create or update a customer document in Firestore
+ * Create or update a salon-specific customer document in Firestore
+ * Structure: owners/{ownerUid}/customers/{customerUid}
  */
 export async function createCustomerDocument(
+  ownerUid: string,
   uid: string,
   email: string,
   fullName: string,
   phone?: string
 ) {
-  const customerRef = doc(db, "customers", uid);
+  if (!ownerUid) {
+    throw new Error("ownerUid is required for salon-specific customer creation");
+  }
   
-  // Check if customer already exists
+  const customerRef = doc(db, "owners", ownerUid, "customers", uid);
+  
+  // Check if customer already exists for this salon
   const existing = await getDoc(customerRef);
   
   if (existing.exists()) {
@@ -45,12 +51,13 @@ export async function createCustomerDocument(
       updatedAt: serverTimestamp(),
     });
   } else {
-    // Create new customer
+    // Create new salon-specific customer
     await setDoc(customerRef, {
       uid,
       email,
       fullName,
       phone: phone || "",
+      ownerUid,
       createdAt: serverTimestamp(),
       updatedAt: serverTimestamp(),
       totalBookings: 0,
@@ -59,11 +66,17 @@ export async function createCustomerDocument(
 }
 
 /**
- * Get customer by UID
+ * Get salon-specific customer by UID
+ * Structure: owners/{ownerUid}/customers/{customerUid}
  */
-export async function getCustomerByUid(uid: string): Promise<Customer | null> {
+export async function getCustomerByUid(ownerUid: string, uid: string): Promise<Customer | null> {
+  if (!ownerUid) {
+    console.error("ownerUid is required for salon-specific customer lookup");
+    return null;
+  }
+  
   try {
-    const customerRef = doc(db, "customers", uid);
+    const customerRef = doc(db, "owners", ownerUid, "customers", uid);
     const customerSnap = await getDoc(customerRef);
     
     if (customerSnap.exists()) {
@@ -77,16 +90,23 @@ export async function getCustomerByUid(uid: string): Promise<Customer | null> {
 }
 
 /**
- * Get customer by email
+ * Get salon-specific customer by email
+ * Structure: owners/{ownerUid}/customers/{...}
  */
-export async function getCustomerByEmail(email: string): Promise<Customer | null> {
+export async function getCustomerByEmail(ownerUid: string, email: string): Promise<Customer | null> {
+  if (!ownerUid) {
+    console.error("ownerUid is required for salon-specific customer lookup");
+    return null;
+  }
+  
   try {
-    const q = query(collection(db, "customers"), where("email", "==", email));
+    const customersRef = collection(db, "owners", ownerUid, "customers");
+    const q = query(customersRef, where("email", "==", email));
     const querySnapshot = await getDocs(q);
     
     if (!querySnapshot.empty) {
-      const doc = querySnapshot.docs[0];
-      return { ...doc.data(), uid: doc.id } as Customer;
+      const customerDoc = querySnapshot.docs[0];
+      return { ...customerDoc.data(), uid: customerDoc.id } as Customer;
     }
     return null;
   } catch (error) {
@@ -96,11 +116,17 @@ export async function getCustomerByEmail(email: string): Promise<Customer | null
 }
 
 /**
- * Update customer booking count
+ * Update salon-specific customer booking count
+ * Structure: owners/{ownerUid}/customers/{customerUid}
  */
-export async function incrementCustomerBookings(uid: string) {
+export async function incrementCustomerBookings(ownerUid: string, uid: string) {
+  if (!ownerUid) {
+    console.error("ownerUid is required for salon-specific customer update");
+    return;
+  }
+  
   try {
-    const customerRef = doc(db, "customers", uid);
+    const customerRef = doc(db, "owners", ownerUid, "customers", uid);
     const customerSnap = await getDoc(customerRef);
     
     if (customerSnap.exists()) {
