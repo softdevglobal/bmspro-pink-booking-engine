@@ -599,10 +599,13 @@ function BookPageContent() {
       : [];
 
     // Check if a slot is blocked by OTHER services selected in the CURRENT booking session
-    // (for the same staff member) - only block if slot time falls within another service's period
-    const isSlotBlockedByCurrentSelection = (slotStartMin: number): boolean => {
-      if (!staffIdForService || staffIdForService === "any") return false;
-      if (!forServiceId) return false;
+    // (for the same staff member) - checks for ANY overlap with the new service duration
+    const isSlotBlockedByCurrentSelection = (slotStartMin: number): { blocked: boolean; reason?: string } => {
+      if (!staffIdForService || staffIdForService === "any") return { blocked: false };
+      if (!forServiceId) return { blocked: false };
+      
+      // Calculate when this new service would END
+      const newServiceEndMin = slotStartMin + serviceDuration;
       
       // Go through all other services selected in this booking
       for (const otherServiceId of bkSelectedServices) {
@@ -630,21 +633,28 @@ function BookPageContent() {
         const otherStartMin = otherTimeParts[0] * 60 + otherTimeParts[1];
         const otherEndMin = otherStartMin + otherDuration;
         
-        // Check if this slot time falls WITHIN the other service's period
-        // Slot is blocked if: other_start <= slot_time < other_end
-        if (slotStartMin >= otherStartMin && slotStartMin < otherEndMin) {
-          return true;
+        // Check for ANY overlap between the new service and the other selected service
+        // Overlap occurs if: newStart < otherEnd AND otherStart < newEnd
+        if (slotStartMin < otherEndMin && otherStartMin < newServiceEndMin) {
+          // Determine the reason for the conflict
+          if (slotStartMin >= otherStartMin && slotStartMin < otherEndMin) {
+            return { blocked: true, reason: 'selected' }; // Slot starts during other selected service
+          } else {
+            return { blocked: true, reason: 'insufficient_time_selected' }; // Would extend into other service
+          }
         }
       }
       
-      return false;
+      return { blocked: false };
     };
 
     // Check if a specific time slot is OCCUPIED (booking is in progress at that time)
-    // This only checks if the SLOT TIME falls within an existing booking, 
-    // NOT whether the new service duration would overlap
-    const isSlotOccupied = (slotStartMin: number): boolean => {
-      if (!staffIdForService || staffIdForService === "any") return false;
+    // Also checks if the NEW service would OVERLAP with any existing booking
+    const isSlotOccupied = (slotStartMin: number): { occupied: boolean; reason?: string } => {
+      if (!staffIdForService || staffIdForService === "any") return { occupied: false };
+      
+      // Calculate when this new service would END
+      const newServiceEndMin = slotStartMin + serviceDuration;
       
       for (const booking of relevantBookings) {
         // If booking has individual services, check each service's time slot separately
@@ -658,10 +668,15 @@ function BookPageContent() {
                 const svcDuration = svc.duration || 60;
                 const svcEndMin = svcStartMin + svcDuration;
                 
-                // Check if this slot time falls WITHIN the booking period
-                // Slot is blocked if: booking_start <= slot_time < booking_end
-                if (slotStartMin >= svcStartMin && slotStartMin < svcEndMin) {
-                  return true;
+                // Check for ANY overlap between the new service and existing service
+                // Overlap occurs if: newStart < existingEnd AND existingStart < newEnd
+                if (slotStartMin < svcEndMin && svcStartMin < newServiceEndMin) {
+                  // Determine the reason for the conflict
+                  if (slotStartMin >= svcStartMin && slotStartMin < svcEndMin) {
+                    return { occupied: true, reason: 'booked' }; // Slot starts during existing booking
+                  } else {
+                    return { occupied: true, reason: 'insufficient_time' }; // Service would extend into existing booking
+                  }
                 }
               }
             }
@@ -674,16 +689,22 @@ function BookPageContent() {
               const bStartMin = timeParts[0] * 60 + timeParts[1];
               const bEndMin = bStartMin + (booking.duration || 60);
               
-              // Check if this slot time falls WITHIN the booking period
-              if (slotStartMin >= bStartMin && slotStartMin < bEndMin) {
-                return true;
+              // Check for ANY overlap between the new service and existing booking
+              // Overlap occurs if: newStart < existingEnd AND existingStart < newEnd
+              if (slotStartMin < bEndMin && bStartMin < newServiceEndMin) {
+                // Determine the reason for the conflict
+                if (slotStartMin >= bStartMin && slotStartMin < bEndMin) {
+                  return { occupied: true, reason: 'booked' }; // Slot starts during existing booking
+                } else {
+                  return { occupied: true, reason: 'insufficient_time' }; // Service would extend into existing booking
+                }
               }
             }
           }
         }
       }
       
-      return false;
+      return { occupied: false };
     };
     
     // Generate slots using branch hours
@@ -692,37 +713,42 @@ function BookPageContent() {
     const endMinutes = Math.floor(endHour) * 60 + Math.round((endHour % 1) * 60);
     const interval = 15;
     
-    // Calculate the latest possible slot start time
-    // The service must finish by closing time, so: slotStart + duration <= endMinutes
-    // Therefore: slotStart <= endMinutes - duration
-    const latestSlotStart = endMinutes - serviceDuration;
+    // Helper to format time
+    const formatTime = (mins: number) => {
+      const h = Math.floor(mins / 60);
+      const m = mins % 60;
+      return `${String(h).padStart(2, "0")}:${String(m).padStart(2, "0")}`;
+    };
     
-    // Only generate slots that can finish by closing time
-    for (let slotStartMinutes = startMinutes; slotStartMinutes <= latestSlotStart; slotStartMinutes += interval) {
-      // Verify: slot + duration must not exceed closing time (safety check)
-      const slotEndMinutes = slotStartMinutes + serviceDuration;
-      if (slotEndMinutes > endMinutes) {
-        break; // Stop if slot doesn't fit
-      }
-
+    // Generate all slots within branch hours
+    for (let slotStartMinutes = startMinutes; slotStartMinutes < endMinutes; slotStartMinutes += interval) {
       // Skip past times if date is today
       if (isToday && slotStartMinutes <= currentMinutes) {
         continue;
       }
 
-      const hours = Math.floor(slotStartMinutes / 60);
-      const minutes = slotStartMinutes % 60;
-      const timeStr = `${String(hours).padStart(2, "0")}:${String(minutes).padStart(2, "0")}`;
+      const timeStr = formatTime(slotStartMinutes);
+      
+      // Check if service would extend past closing time
+      if (slotStartMinutes + serviceDuration > endMinutes) {
+        const closeTimeStr = formatTime(endMinutes);
+        slots.push({ 
+          time: timeStr, 
+          available: false, 
+          reason: 'closes_before_finish',
+          message: `Service ends after closing time (${closeTimeStr})`
+        } as any);
+        continue;
+      }
       
       // Check availability status
-      // Only check if the slot TIME is occupied (not considering new service duration)
-      const occupiedByBooking = isSlotOccupied(slotStartMinutes);
-      const blockedBySelection = isSlotBlockedByCurrentSelection(slotStartMinutes);
+      const occupiedResult = isSlotOccupied(slotStartMinutes);
+      const blockedResult = isSlotBlockedByCurrentSelection(slotStartMinutes);
       
-      if (occupiedByBooking) {
-        slots.push({ time: timeStr, available: false, reason: 'booked' });
-      } else if (blockedBySelection) {
-        slots.push({ time: timeStr, available: false, reason: 'selected' });
+      if (occupiedResult.occupied) {
+        slots.push({ time: timeStr, available: false, reason: occupiedResult.reason || 'booked' });
+      } else if (blockedResult.blocked) {
+        slots.push({ time: timeStr, available: false, reason: blockedResult.reason || 'selected' });
       } else {
         slots.push({ time: timeStr, available: true });
       }
@@ -1709,6 +1735,22 @@ function BookPageContent() {
                                     const isDisabled = !slot.available;
                                     const isBookedByOther = slot.reason === 'booked';
                                     const isSelectedForOtherService = slot.reason === 'selected';
+                                    const isInsufficientTime = slot.reason === 'insufficient_time' || slot.reason === 'insufficient_time_selected';
+                                    const isClosesBeforeFinish = slot.reason === 'closes_before_finish';
+                                    
+                                    // Determine tooltip message
+                                    let tooltipMessage = 'Available';
+                                    if (isDisabled) {
+                                      if (isClosesBeforeFinish) {
+                                        tooltipMessage = (slot as any).message || 'Service would end after branch closing time';
+                                      } else if (isInsufficientTime) {
+                                        tooltipMessage = 'Not enough time - service would overlap with next booking';
+                                      } else if (isBookedByOther) {
+                                        tooltipMessage = 'Already booked by another customer';
+                                      } else if (isSelectedForOtherService) {
+                                        tooltipMessage = 'Selected for another service in this booking';
+                                      }
+                                    }
                                     
                                     return (
                                       <button
@@ -1719,23 +1761,45 @@ function BookPageContent() {
                                           }
                                         }}
                                         disabled={isDisabled}
-                                        title={isDisabled ? (isBookedByOther ? 'Already booked by another customer' : 'Selected for another service in this booking') : 'Available'}
-                                        className={`py-2 px-1 rounded-lg font-semibold text-xs transition-all ${
+                                        title={tooltipMessage}
+                                        className={`py-2 px-1 rounded-lg font-semibold text-xs transition-all relative ${
                                           isSelected
                                             ? "bg-gradient-to-r from-pink-600 to-purple-600 text-white shadow-md transform scale-105"
-                                            : isBookedByOther
-                                              ? "bg-red-50 text-red-400 border border-red-200 cursor-not-allowed line-through"
-                                              : isSelectedForOtherService
-                                                ? "bg-amber-50 text-amber-500 border border-amber-200 cursor-not-allowed"
-                                                : "bg-white text-gray-700 border border-gray-200 hover:border-pink-300 hover:bg-pink-50"
+                                            : isClosesBeforeFinish
+                                              ? "bg-orange-50 text-orange-400 border border-orange-200 cursor-not-allowed"
+                                              : isInsufficientTime
+                                                ? "bg-yellow-50 text-yellow-600 border border-yellow-300 cursor-not-allowed"
+                                                : isBookedByOther
+                                                  ? "bg-red-50 text-red-400 border border-red-200 cursor-not-allowed line-through"
+                                                  : isSelectedForOtherService
+                                                    ? "bg-amber-50 text-amber-500 border border-amber-200 cursor-not-allowed"
+                                                    : "bg-white text-gray-700 border border-gray-200 hover:border-pink-300 hover:bg-pink-50"
                                         }`}
                                       >
                                         {slot.time}
+                                        {(isClosesBeforeFinish || isInsufficientTime) && (
+                                          <span className="absolute -top-1 -right-1 w-3 h-3 bg-orange-500 rounded-full flex items-center justify-center">
+                                            <span className="text-white text-[8px]">!</span>
+                                          </span>
+                                        )}
                                       </button>
                                     );
                                   })
                                 )}
                               </div>
+                              {/* Show legend for unavailable slot reasons */}
+                              {slots.some(s => s.reason === 'closes_before_finish' || s.reason === 'insufficient_time') && (
+                                <div className="mt-3 text-[10px] text-gray-500 flex flex-wrap gap-3 bg-gray-50 p-2 rounded-lg">
+                                  <span className="flex items-center gap-1">
+                                    <span className="w-2 h-2 rounded bg-orange-300"></span>
+                                    Branch closes before service ends
+                                  </span>
+                                  <span className="flex items-center gap-1">
+                                    <span className="w-2 h-2 rounded bg-yellow-300"></span>
+                                    Would overlap with next booking
+                                  </span>
+                                </div>
+                              )}
                             </div>
                           </div>
                         );
