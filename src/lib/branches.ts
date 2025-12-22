@@ -7,6 +7,14 @@ import {
   where,
 } from "firebase/firestore";
 
+// Branch location data for geofencing
+export type BranchLocation = {
+  latitude: number;
+  longitude: number;
+  placeId?: string; // Google Places ID for reference
+  formattedAddress?: string;
+};
+
 export type BranchInput = {
   name: string;
   address: string;
@@ -30,6 +38,9 @@ export type BranchInput = {
   manager?: string;
   adminStaffId?: string | null;
   status?: "Active" | "Pending" | "Closed";
+  // Geolocation fields for staff check-in
+  location?: BranchLocation;
+  allowedCheckInRadius?: number; // in meters (default 100m)
 };
 
 export function subscribeBranchesForOwner(
