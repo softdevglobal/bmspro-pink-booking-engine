@@ -487,7 +487,7 @@ export async function POST(req: NextRequest) {
           });
         }
         
-        console.log(`Booking ${bookingCode}: Sent notifications to ${staffToNotify.length} assigned staff member(s)`);
+        console.log(`✅ Booking ${bookingCode}: Sent notifications to ${staffToNotify.length} assigned staff member(s)`);
       } catch (staffNotifError) {
         console.error("Error creating staff notifications:", staffNotifError);
       }
