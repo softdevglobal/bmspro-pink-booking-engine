@@ -743,16 +743,22 @@ export async function POST(req: NextRequest) {
         const unassignedServices = processedServices?.filter(s => !isValidStaffAssignment(s.staffId)) || [];
         const unassignedServiceNames = unassignedServices.map(s => s.name || "Service").join(", ");
         
+        const title = staffAnalysis.noneAssigned 
+          ? "New Booking - Staff Assignment Required" 
+          : "Booking - Partial Staff Assignment Required";
+        const message = staffAnalysis.noneAssigned 
+          ? `New booking from ${body.client} for ${unassignedServiceNames} on ${body.date} at ${body.time}. Please assign staff to all services.`
+          : `Booking from ${body.client} needs staff assignment for: ${unassignedServiceNames}. Other services have been sent to assigned staff.`;
+        
         const adminNotificationPayload = {
           bookingId: ref.id,
           bookingCode: bookingCode,
           type: "booking_needs_assignment",
-          title: staffAnalysis.noneAssigned ? "New Booking - Staff Assignment Required" : "Booking - Partial Staff Assignment Required",
-          message: staffAnalysis.noneAssigned 
-            ? `New booking from ${body.client} for ${unassignedServiceNames} on ${body.date} at ${body.time}. Please assign staff to all services.`
-            : `Booking from ${body.client} needs staff assignment for: ${unassignedServiceNames}. Other services have been sent to assigned staff.`,
+          title,
+          message,
           status: initialStatus,
           ownerUid: String(body.ownerUid),
+          targetOwnerUid: String(body.ownerUid), // Target owner for unassigned bookings
           // Target admin/owner
           targetRole: "admin",
           clientName: String(body.client),
@@ -771,7 +777,19 @@ export async function POST(req: NextRequest) {
           createdAt: FieldValue.serverTimestamp(),
         };
         
-        await db.collection("notifications").add(adminNotificationPayload);
+        const notifRef = await db.collection("notifications").add(adminNotificationPayload);
+        
+        // Send FCM push notification to owner for unassigned bookings
+        const ownerFcmToken = await getUserFcmToken(db, String(body.ownerUid));
+        if (ownerFcmToken) {
+          await sendPushNotification(ownerFcmToken, title, message, {
+            notificationId: notifRef.id,
+            type: "booking_needs_assignment",
+            bookingId: ref.id,
+            bookingCode: bookingCode || "",
+          });
+          console.log(`✅ Booking ${bookingCode}: FCM push sent to owner for unassigned booking`);
+        }
         
         console.log(`Booking ${bookingCode}: Admin notified - ${unassignedServices.length} service(s) need staff assignment`);
       } catch (adminNotifError) {
