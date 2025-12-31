@@ -1,5 +1,6 @@
 import { getApps, initializeApp, cert } from "firebase-admin/app";
 import { getFirestore } from "firebase-admin/firestore";
+import { getMessaging, Messaging } from "firebase-admin/messaging";
 
 let adminApp: any = null;
 
@@ -122,6 +123,15 @@ export const adminAuth = () => {
     return getAuth(getAdminApp());
   } catch (error) {
     console.error("Error getting Auth:", error);
+    throw error;
+  }
+};
+
+export const adminMessaging = (): Messaging => {
+  try {
+    return getMessaging(getAdminApp());
+  } catch (error) {
+    console.error("Error getting Messaging:", error);
     throw error;
   }
 };

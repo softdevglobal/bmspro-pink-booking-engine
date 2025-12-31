@@ -1,6 +1,7 @@
 import { NextRequest, NextResponse } from "next/server";
-import { adminDb } from "@/lib/firebaseAdmin";
+import { adminDb, adminMessaging } from "@/lib/firebaseAdmin";
 import { FieldValue } from "firebase-admin/firestore";
+import { Message } from "firebase-admin/messaging";
 import { generateBookingCode } from "@/lib/bookings";
 import { getNotificationContent } from "@/lib/notifications";
 import { shouldBlockSlots } from "@/lib/bookingTypes";
@@ -55,6 +56,101 @@ function analyzeStaffAssignments(
 }
 
 /**
+ * Get FCM token for a user
+ */
+async function getUserFcmToken(db: FirebaseFirestore.Firestore, userUid: string): Promise<string | null> {
+  try {
+    // Check users collection first
+    const userDoc = await db.collection("users").doc(userUid).get();
+    if (userDoc.exists) {
+      const userData = userDoc.data();
+      if (userData?.fcmToken) {
+        return userData.fcmToken;
+      }
+    }
+    
+    // Also check salon_staff collection
+    const staffDoc = await db.collection("salon_staff").doc(userUid).get();
+    if (staffDoc.exists) {
+      const staffData = staffDoc.data();
+      if (staffData?.fcmToken) {
+        return staffData.fcmToken;
+      }
+    }
+    
+    return null;
+  } catch (error) {
+    console.error("Error getting FCM token for user:", userUid, error);
+    return null;
+  }
+}
+
+/**
+ * Send FCM push notification
+ */
+async function sendPushNotification(
+  fcmToken: string,
+  title: string,
+  body: string,
+  data?: Record<string, string>
+): Promise<void> {
+  try {
+    const messaging = adminMessaging();
+    
+    const message: Message = {
+      token: fcmToken,
+      notification: {
+        title,
+        body,
+      },
+      data: data || {},
+      android: {
+        priority: "high",
+        notification: {
+          sound: "default",
+          channelId: "appointments",
+        },
+      },
+      apns: {
+        payload: {
+          aps: {
+            sound: "default",
+            badge: 1,
+          },
+        },
+      },
+    };
+
+    await messaging.send(message);
+    console.log("✅ Push notification sent successfully");
+  } catch (error: any) {
+    // Don't throw error - push notification failure shouldn't break notification creation
+    console.error("⚠️ Error sending push notification:", error?.message || error);
+    if (error?.code === "messaging/invalid-registration-token" || 
+        error?.code === "messaging/registration-token-not-registered") {
+      console.log("Invalid FCM token detected, but continuing with notification creation");
+    }
+  }
+}
+
+/**
+ * Get branch admin UID for a branch
+ */
+async function getBranchAdminUid(db: FirebaseFirestore.Firestore, branchId: string): Promise<string | null> {
+  try {
+    const branchDoc = await db.collection("branches").doc(branchId).get();
+    if (branchDoc.exists) {
+      const branchData = branchDoc.data();
+      return branchData?.adminStaffId || null;
+    }
+    return null;
+  } catch (error) {
+    console.error("Error getting branch admin:", error);
+    return null;
+  }
+}
+
+/**
  * Create staff assignment notification
  */
 async function createStaffAssignmentNotification(db: FirebaseFirestore.Firestore, data: {
@@ -77,12 +173,15 @@ async function createStaffAssignmentNotification(db: FirebaseFirestore.Firestore
     ? data.services.filter(s => s.staffId === data.staffUid).map(s => s.name).join(", ")
     : data.serviceName || "Service";
 
+  const title = "New Appointment Request";
+  const message = `You have a new appointment request from ${data.clientName} for ${serviceList} on ${data.bookingDate} at ${data.bookingTime}. Please accept or reject this booking.`;
+
   const notificationPayload = {
     bookingId: data.bookingId,
     bookingCode: data.bookingCode || null,
     type: "staff_assignment",
-    title: "New Appointment Request",
-    message: `You have a new appointment request from ${data.clientName} for ${serviceList} on ${data.bookingDate} at ${data.bookingTime}. Please accept or reject this booking.`,
+    title,
+    message,
     status: "AwaitingStaffApproval",
     ownerUid: data.ownerUid,
     staffUid: data.staffUid,
@@ -100,7 +199,87 @@ async function createStaffAssignmentNotification(db: FirebaseFirestore.Firestore
     createdAt: FieldValue.serverTimestamp(),
   };
 
-  await db.collection("notifications").add(notificationPayload);
+  const notifRef = await db.collection("notifications").add(notificationPayload);
+  
+  // Send FCM push notification to the staff member
+  const fcmToken = await getUserFcmToken(db, data.staffUid);
+  if (fcmToken) {
+    await sendPushNotification(fcmToken, title, message, {
+      notificationId: notifRef.id,
+      type: "staff_assignment",
+      bookingId: data.bookingId,
+      bookingCode: data.bookingCode || "",
+    });
+  } else {
+    console.log(`⚠️ No FCM token found for staff ${data.staffUid}, skipping push notification`);
+  }
+}
+
+/**
+ * Create branch admin notification for new booking
+ */
+async function createBranchAdminNotification(db: FirebaseFirestore.Firestore, data: {
+  bookingId: string;
+  bookingCode?: string;
+  branchId: string;
+  branchAdminUid: string;
+  clientName: string;
+  clientPhone?: string;
+  serviceName?: string;
+  services?: Array<{ name: string; staffName?: string; staffId?: string }>;
+  branchName?: string;
+  bookingDate: string;
+  bookingTime: string;
+  duration?: number;
+  price?: number;
+  ownerUid: string;
+  status: string;
+}): Promise<void> {
+  const serviceList = data.services && data.services.length > 0
+    ? data.services.map(s => s.name).join(", ")
+    : data.serviceName || "Service";
+
+  const title = "New Booking at Your Branch";
+  const message = `New booking from ${data.clientName} for ${serviceList} on ${data.bookingDate} at ${data.bookingTime} at ${data.branchName || "your branch"}.`;
+
+  const notificationPayload = {
+    bookingId: data.bookingId,
+    bookingCode: data.bookingCode || null,
+    type: "branch_booking_created",
+    title,
+    message,
+    status: data.status,
+    ownerUid: data.ownerUid,
+    branchAdminUid: data.branchAdminUid,
+    targetAdminUid: data.branchAdminUid, // For targeting branch admin
+    branchId: data.branchId,
+    clientName: data.clientName,
+    clientPhone: data.clientPhone || null,
+    serviceName: data.serviceName || null,
+    services: data.services || null,
+    branchName: data.branchName || null,
+    bookingDate: data.bookingDate,
+    bookingTime: data.bookingTime,
+    duration: data.duration || null,
+    price: data.price || null,
+    read: false,
+    createdAt: FieldValue.serverTimestamp(),
+  };
+
+  const notifRef = await db.collection("notifications").add(notificationPayload);
+  
+  // Send FCM push notification to the branch admin
+  const fcmToken = await getUserFcmToken(db, data.branchAdminUid);
+  if (fcmToken) {
+    await sendPushNotification(fcmToken, title, message, {
+      notificationId: notifRef.id,
+      type: "branch_booking_created",
+      bookingId: data.bookingId,
+      bookingCode: data.bookingCode || "",
+    });
+  } else {
+    console.log(`⚠️ No FCM token found for branch admin ${data.branchAdminUid}, skipping push notification`);
+  }
 }
 
 export const runtime = "nodejs";
@@ -536,6 +715,39 @@ export async function POST(req: NextRequest) {
       }
     } else {
       console.log(`Booking ${bookingCode}: All services have assigned staff - no admin notification needed`);
+    }
+    
+    // Send notification to branch admin (if branch has an admin and admin is not the same as staff/owner)
+    try {
+      const branchAdminUid = await getBranchAdminUid(db, String(body.branchId));
+      if (branchAdminUid && 
+          branchAdminUid !== String(body.ownerUid) && 
+          branchAdminUid !== body.staffId) {
+        await createBranchAdminNotification(db, {
+          bookingId: ref.id,
+          bookingCode: bookingCode,
+          branchId: String(body.branchId),
+          branchAdminUid: branchAdminUid,
+          clientName: String(body.client),
+          clientPhone: body.clientPhone,
+          serviceName: body.serviceName,
+          services: processedServices?.map(s => ({
+            name: s.name || "Service",
+            staffName: s.staffName || undefined,
+            staffId: s.staffId || undefined,
+          })),
+          branchName: body.branchName,
+          bookingDate: String(body.date),
+          bookingTime: String(body.time),
+          duration: Number(body.duration),
+          price: Number(body.price),
+          ownerUid: String(body.ownerUid),
+          status: initialStatus,
+        });
+        console.log(`✅ Booking ${bookingCode}: Branch admin ${branchAdminUid} notified`);
+      }
+    } catch (branchAdminError) {
+      console.error("Error notifying branch admin:", branchAdminError);
     }
     
     return NextResponse.json({ id: ref.id, bookingCode: bookingCode });
