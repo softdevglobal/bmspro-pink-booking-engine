@@ -216,6 +216,70 @@ async function createStaffAssignmentNotification(db: FirebaseFirestore.Firestore
 }
 
 /**
+ * Create owner notification for new booking
+ */
+async function createOwnerNotification(db: FirebaseFirestore.Firestore, data: {
+  bookingId: string;
+  bookingCode?: string;
+  ownerUid: string;
+  clientName: string;
+  clientPhone?: string;
+  serviceName?: string;
+  services?: Array<{ name: string; staffName?: string; staffId?: string }>;
+  branchName?: string;
+  bookingDate: string;
+  bookingTime: string;
+  duration?: number;
+  price?: number;
+  status: string;
+}): Promise<void> {
+  const serviceList = data.services && data.services.length > 0
+    ? data.services.map(s => s.name).join(", ")
+    : data.serviceName || "Service";
+
+  const title = "New Booking from Booking Engine";
+  const message = `New booking from ${data.clientName} for ${serviceList} on ${data.bookingDate} at ${data.bookingTime} at ${data.branchName || "your salon"}.`;
+
+  const notificationPayload = {
+    bookingId: data.bookingId,
+    bookingCode: data.bookingCode || null,
+    type: "booking_engine_new_booking",
+    title,
+    message,
+    status: data.status,
+    ownerUid: data.ownerUid,
+    targetOwnerUid: data.ownerUid, // Explicitly target the owner
+    clientName: data.clientName,
+    clientPhone: data.clientPhone || null,
+    serviceName: data.serviceName || null,
+    services: data.services || null,
+    branchName: data.branchName || null,
+    bookingDate: data.bookingDate,
+    bookingTime: data.bookingTime,
+    duration: data.duration || null,
+    price: data.price || null,
+    read: false,
+    createdAt: FieldValue.serverTimestamp(),
+  };
+
+  const notifRef = await db.collection("notifications").add(notificationPayload);
+  
+  // Send FCM push notification to the owner
+  const fcmToken = await getUserFcmToken(db, data.ownerUid);
+  if (fcmToken) {
+    await sendPushNotification(fcmToken, title, message, {
+      notificationId: notifRef.id,
+      type: "booking_engine_new_booking",
+      bookingId: data.bookingId,
+      bookingCode: data.bookingCode || "",
+    });
+    console.log(`✅ Push notification sent to owner ${data.ownerUid}`);
+  } else {
+    console.log(`⚠️ No FCM token found for owner ${data.ownerUid}, skipping push notification`);
+  }
+}
+
+/**
  * Create branch admin notification for new booking
  */
 async function createBranchAdminNotification(db: FirebaseFirestore.Firestore, data: {
@@ -748,6 +812,32 @@ export async function POST(req: NextRequest) {
       }
     } catch (branchAdminError) {
       console.error("Error notifying branch admin:", branchAdminError);
+    }
+    
+    // ALWAYS send notification to salon owner for every booking from booking engine
+    try {
+      await createOwnerNotification(db, {
+        bookingId: ref.id,
+        bookingCode: bookingCode,
+        ownerUid: String(body.ownerUid),
+        clientName: String(body.client),
+        clientPhone: body.clientPhone,
+        serviceName: body.serviceName,
+        services: processedServices?.map(s => ({
+          name: s.name || "Service",
+          staffName: s.staffName || undefined,
+          staffId: s.staffId || undefined,
+        })),
+        branchName: body.branchName,
+        bookingDate: String(body.date),
+        bookingTime: String(body.time),
+        duration: Number(body.duration),
+        price: Number(body.price),
+        status: initialStatus,
+      });
+      console.log(`✅ Booking ${bookingCode}: Salon owner ${body.ownerUid} notified`);
+    } catch (ownerNotifError) {
+      console.error("Error notifying salon owner:", ownerNotifError);
     }
     
     return NextResponse.json({ id: ref.id, bookingCode: bookingCode });
