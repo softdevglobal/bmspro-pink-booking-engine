@@ -227,6 +227,7 @@ async function createOwnerNotification(db: FirebaseFirestore.Firestore, data: {
   serviceName?: string;
   services?: Array<{ name: string; staffName?: string; staffId?: string }>;
   branchName?: string;
+  branchId?: string;
   bookingDate: string;
   bookingTime: string;
   duration?: number;
@@ -254,6 +255,7 @@ async function createOwnerNotification(db: FirebaseFirestore.Firestore, data: {
     serviceName: data.serviceName || null,
     services: data.services || null,
     branchName: data.branchName || null,
+    branchId: data.branchId || null, // Include branchId for branch admin filtering
     bookingDate: data.bookingDate,
     bookingTime: data.bookingTime,
     duration: data.duration || null,
@@ -771,6 +773,7 @@ export async function POST(req: NextRequest) {
             needsAssignment: !isValidStaffAssignment(s.staffId),
           })) || null,
           branchName: body.branchName || null,
+          branchId: body.branchId ? String(body.branchId) : null, // Include branchId for branch admin filtering
           bookingDate: body.date || null,
           bookingTime: body.time || null,
           read: false,
@@ -847,6 +850,7 @@ export async function POST(req: NextRequest) {
           staffId: s.staffId || undefined,
         })),
         branchName: body.branchName,
+        branchId: body.branchId ? String(body.branchId) : undefined, // Include branchId for branch admin filtering
         bookingDate: String(body.date),
         bookingTime: String(body.time),
         duration: Number(body.duration),
