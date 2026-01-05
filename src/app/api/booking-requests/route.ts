@@ -134,19 +134,46 @@ async function sendPushNotification(
 }
 
 /**
- * Get branch admin UID for a branch
+ * Get all branch admin UIDs for a branch
+ * Branch admins are stored in the users collection with role='salon_branch_admin' and matching branchId
  */
-async function getBranchAdminUid(db: FirebaseFirestore.Firestore, branchId: string): Promise<string | null> {
+async function getBranchAdminUids(db: FirebaseFirestore.Firestore, branchId: string, ownerUid: string): Promise<string[]> {
   try {
-    const branchDoc = await db.collection("branches").doc(branchId).get();
-    if (branchDoc.exists) {
-      const branchData = branchDoc.data();
-      return branchData?.adminStaffId || null;
+    // First, try to get branch document to get ownerUid if not provided
+    let actualOwnerUid = ownerUid;
+    if (!actualOwnerUid) {
+      const branchDoc = await db.collection("branches").doc(branchId).get();
+      if (branchDoc.exists) {
+        const branchData = branchDoc.data();
+        actualOwnerUid = branchData?.ownerUid || ownerUid;
+      }
     }
-    return null;
+    
+    // Query users collection for branch admins
+    // Branch admins have: role='salon_branch_admin', ownerUid matches, and branchId matches
+    const branchAdminQuery = await db.collection("users")
+      .where("ownerUid", "==", actualOwnerUid)
+      .where("role", "==", "salon_branch_admin")
+      .where("branchId", "==", branchId)
+      .get();
+    
+    const branchAdminUids = branchAdminQuery.docs.map(doc => doc.id);
+    
+    // Also check legacy adminStaffId in branch document (for backward compatibility)
+    if (branchAdminUids.length === 0) {
+      const branchDoc = await db.collection("branches").doc(branchId).get();
+      if (branchDoc.exists) {
+        const branchData = branchDoc.data();
+        if (branchData?.adminStaffId) {
+          return [branchData.adminStaffId];
+        }
+      }
+    }
+    
+    return branchAdminUids;
   } catch (error) {
-    console.error("Error getting branch admin:", error);
-    return null;
+    console.error("Error getting branch admins:", error);
+    return [];
   }
 }
 
@@ -738,7 +765,7 @@ export async function POST(req: NextRequest) {
       }
     }
     
-    // If any services need staff assignment, notify admin
+    // If any services need staff assignment, notify admin (owner and branch admins)
     if (staffAnalysis.hasAnyUnassignedStaff) {
       try {
         // Create admin notification for partial assignment needed
@@ -752,6 +779,7 @@ export async function POST(req: NextRequest) {
           ? `New booking from ${body.client} for ${unassignedServiceNames} on ${body.date} at ${body.time}. Please assign staff to all services.`
           : `Booking from ${body.client} needs staff assignment for: ${unassignedServiceNames}. Other services have been sent to assigned staff.`;
         
+        // Notify salon owner
         const adminNotificationPayload = {
           bookingId: ref.id,
           bookingCode: bookingCode,
@@ -794,7 +822,59 @@ export async function POST(req: NextRequest) {
           console.log(`✅ Booking ${bookingCode}: FCM push sent to owner for unassigned booking`);
         }
         
-        console.log(`Booking ${bookingCode}: Admin notified - ${unassignedServices.length} service(s) need staff assignment`);
+        // Also notify all branch admins for this branch about the unassigned booking
+        const branchAdminUids = await getBranchAdminUids(db, String(body.branchId), String(body.ownerUid));
+        for (const branchAdminUid of branchAdminUids) {
+          // Skip if branch admin is the owner or the assigned staff
+          if (branchAdminUid === String(body.ownerUid) || branchAdminUid === body.staffId) {
+            continue;
+          }
+          
+          // Create notification for branch admin
+          const branchAdminNotificationPayload = {
+            bookingId: ref.id,
+            bookingCode: bookingCode,
+            type: "booking_needs_assignment",
+            title,
+            message,
+            status: initialStatus,
+            ownerUid: String(body.ownerUid),
+            branchAdminUid: branchAdminUid,
+            targetAdminUid: branchAdminUid, // Target branch admin
+            targetRole: "admin",
+            clientName: String(body.client),
+            clientPhone: body.clientPhone || null,
+            serviceName: body.serviceName || null,
+            services: processedServices?.map(s => ({
+              name: s.name || "Service",
+              staffName: s.staffName || "Needs Assignment",
+              staffId: s.staffId || null,
+              needsAssignment: !isValidStaffAssignment(s.staffId),
+            })) || null,
+            branchName: body.branchName || null,
+            branchId: body.branchId ? String(body.branchId) : null,
+            bookingDate: body.date || null,
+            bookingTime: body.time || null,
+            read: false,
+            createdAt: FieldValue.serverTimestamp(),
+          };
+          
+          const branchAdminNotifRef = await db.collection("notifications").add(branchAdminNotificationPayload);
+          
+          // Send FCM push notification to branch admin
+          const branchAdminFcmToken = await getUserFcmToken(db, branchAdminUid);
+          if (branchAdminFcmToken) {
+            await sendPushNotification(branchAdminFcmToken, title, message, {
+              notificationId: branchAdminNotifRef.id,
+              type: "booking_needs_assignment",
+              bookingId: ref.id,
+              bookingCode: bookingCode || "",
+            });
+            console.log(`✅ Booking ${bookingCode}: FCM push sent to branch admin ${branchAdminUid} for unassigned booking`);
+          }
+        }
+        
+        console.log(`Booking ${bookingCode}: Owner and ${branchAdminUids.length} branch admin(s) notified - ${unassignedServices.length} service(s) need staff assignment`);
       } catch (adminNotifError) {
         console.error("Error creating admin notification:", adminNotifError);
       }
@@ -802,12 +882,21 @@ export async function POST(req: NextRequest) {
       console.log(`Booking ${bookingCode}: All services have assigned staff - no admin notification needed`);
     }
     
-    // Send notification to branch admin (if branch has an admin and admin is not the same as staff/owner)
+    // Send notification to all branch admins for this branch (for all bookings, not just unassigned)
     try {
-      const branchAdminUid = await getBranchAdminUid(db, String(body.branchId));
-      if (branchAdminUid && 
-          branchAdminUid !== String(body.ownerUid) && 
-          branchAdminUid !== body.staffId) {
+      const branchAdminUids = await getBranchAdminUids(db, String(body.branchId), String(body.ownerUid));
+      for (const branchAdminUid of branchAdminUids) {
+        // Skip if branch admin is the owner or the assigned staff
+        if (branchAdminUid === String(body.ownerUid) || branchAdminUid === body.staffId) {
+          continue;
+        }
+        
+        // Skip if we already notified this branch admin above (for unassigned bookings)
+        if (staffAnalysis.hasAnyUnassignedStaff) {
+          // Already notified in the unassigned booking section above
+          continue;
+        }
+        
         await createBranchAdminNotification(db, {
           bookingId: ref.id,
           bookingCode: bookingCode,
@@ -830,6 +919,10 @@ export async function POST(req: NextRequest) {
           status: initialStatus,
         });
         console.log(`✅ Booking ${bookingCode}: Branch admin ${branchAdminUid} notified`);
+      }
+      
+      if (branchAdminUids.length > 0) {
+        console.log(`✅ Booking ${bookingCode}: Notified ${branchAdminUids.length} branch admin(s)`);
       }
     } catch (branchAdminError) {
       console.error("Error notifying branch admin:", branchAdminError);
