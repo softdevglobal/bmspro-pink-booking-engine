@@ -768,6 +768,8 @@ export async function POST(req: NextRequest) {
     // If any services need staff assignment, notify admin (owner and branch admins)
     if (staffAnalysis.hasAnyUnassignedStaff) {
       try {
+        console.log(`📋 Booking ${bookingCode}: Detected unassigned staff - hasAnyUnassignedStaff: ${staffAnalysis.hasAnyUnassignedStaff}, noneAssigned: ${staffAnalysis.noneAssigned}`);
+        
         // Create admin notification for partial assignment needed
         const unassignedServices = processedServices?.filter(s => !isValidStaffAssignment(s.staffId)) || [];
         const unassignedServiceNames = unassignedServices.map(s => s.name || "Service").join(", ");
@@ -778,6 +780,8 @@ export async function POST(req: NextRequest) {
         const message = staffAnalysis.noneAssigned 
           ? `New booking from ${body.client} for ${unassignedServiceNames} on ${body.date} at ${body.time}. Please assign staff to all services.`
           : `Booking from ${body.client} needs staff assignment for: ${unassignedServiceNames}. Other services have been sent to assigned staff.`;
+        
+        console.log(`📋 Booking ${bookingCode}: Creating notification for owner ${body.ownerUid} - Title: "${title}"`);
         
         // Notify salon owner
         const adminNotificationPayload = {
@@ -809,26 +813,36 @@ export async function POST(req: NextRequest) {
         };
         
         const notifRef = await db.collection("notifications").add(adminNotificationPayload);
+        console.log(`✅ Booking ${bookingCode}: Notification created in Firestore with ID: ${notifRef.id}`);
         
         // Send FCM push notification to owner for unassigned bookings
         const ownerFcmToken = await getUserFcmToken(db, String(body.ownerUid));
         if (ownerFcmToken) {
+          console.log(`📱 Booking ${bookingCode}: Found FCM token for owner ${body.ownerUid}, sending push notification...`);
           await sendPushNotification(ownerFcmToken, title, message, {
             notificationId: notifRef.id,
             type: "booking_needs_assignment",
             bookingId: ref.id,
             bookingCode: bookingCode || "",
           });
-          console.log(`✅ Booking ${bookingCode}: FCM push sent to owner for unassigned booking`);
+          console.log(`✅ Booking ${bookingCode}: FCM push sent to owner ${body.ownerUid} for unassigned booking`);
+        } else {
+          console.log(`⚠️ Booking ${bookingCode}: No FCM token found for owner ${body.ownerUid}, skipping push notification`);
+          console.log(`⚠️ Booking ${bookingCode}: Notification was still created in Firestore (ID: ${notifRef.id}) - mobile app will receive it when it syncs`);
         }
         
         // Also notify all branch admins for this branch about the unassigned booking
         const branchAdminUids = await getBranchAdminUids(db, String(body.branchId), String(body.ownerUid));
+        console.log(`📋 Booking ${bookingCode}: Found ${branchAdminUids.length} branch admin(s) for branch ${body.branchId}`);
+        
         for (const branchAdminUid of branchAdminUids) {
           // Skip if branch admin is the owner or the assigned staff
           if (branchAdminUid === String(body.ownerUid) || branchAdminUid === body.staffId) {
+            console.log(`⏭️ Booking ${bookingCode}: Skipping branch admin ${branchAdminUid} (is owner or assigned staff)`);
             continue;
           }
+          
+          console.log(`📋 Booking ${bookingCode}: Creating notification for branch admin ${branchAdminUid}`);
           
           // Create notification for branch admin
           const branchAdminNotificationPayload = {
@@ -860,10 +874,12 @@ export async function POST(req: NextRequest) {
           };
           
           const branchAdminNotifRef = await db.collection("notifications").add(branchAdminNotificationPayload);
+          console.log(`✅ Booking ${bookingCode}: Branch admin notification created in Firestore with ID: ${branchAdminNotifRef.id}`);
           
           // Send FCM push notification to branch admin
           const branchAdminFcmToken = await getUserFcmToken(db, branchAdminUid);
           if (branchAdminFcmToken) {
+            console.log(`📱 Booking ${bookingCode}: Found FCM token for branch admin ${branchAdminUid}, sending push notification...`);
             await sendPushNotification(branchAdminFcmToken, title, message, {
               notificationId: branchAdminNotifRef.id,
               type: "booking_needs_assignment",
@@ -871,10 +887,13 @@ export async function POST(req: NextRequest) {
               bookingCode: bookingCode || "",
             });
             console.log(`✅ Booking ${bookingCode}: FCM push sent to branch admin ${branchAdminUid} for unassigned booking`);
+          } else {
+            console.log(`⚠️ Booking ${bookingCode}: No FCM token found for branch admin ${branchAdminUid}, skipping push notification`);
+            console.log(`⚠️ Booking ${bookingCode}: Notification was still created in Firestore (ID: ${branchAdminNotifRef.id}) - mobile app will receive it when it syncs`);
           }
         }
         
-        console.log(`Booking ${bookingCode}: Owner and ${branchAdminUids.length} branch admin(s) notified - ${unassignedServices.length} service(s) need staff assignment`);
+        console.log(`✅ Booking ${bookingCode}: Owner and ${branchAdminUids.length} branch admin(s) notified - ${unassignedServices.length} service(s) need staff assignment`);
       } catch (adminNotifError) {
         console.error("Error creating admin notification:", adminNotifError);
       }
