@@ -705,7 +705,33 @@ export async function POST(req: NextRequest) {
         createdAt: FieldValue.serverTimestamp(),
       };
       
-      await db.collection("notifications").add(customerNotificationPayload);
+      const customerNotifRef = await db.collection("notifications").add(customerNotificationPayload);
+      
+      // Send FCM push notification to customer if they have a customerUid
+      if (body.customerUid) {
+        try {
+          const customerFcmToken = await getUserFcmToken(db, body.customerUid);
+          if (customerFcmToken) {
+            console.log(`📱 Booking ${bookingCode}: Found FCM token for customer ${body.customerUid}, sending push notification...`);
+            await sendPushNotification(customerFcmToken, customerNotificationContent.title, customerNotificationContent.message, {
+              notificationId: customerNotifRef.id,
+              type: customerNotificationContent.type,
+              bookingId: ref.id,
+              bookingCode: bookingCode || "",
+            });
+            console.log(`✅ Booking ${bookingCode}: FCM push sent to customer ${body.customerUid}`);
+          } else {
+            console.log(`⚠️ Booking ${bookingCode}: No FCM token found for customer ${body.customerUid}, skipping push notification`);
+            console.log(`⚠️ Booking ${bookingCode}: Notification was still created in Firestore (ID: ${customerNotifRef.id}) - mobile app will receive it when it syncs`);
+          }
+        } catch (fcmError) {
+          // Don't fail if FCM push fails - notification is already in Firestore
+          console.error(`⚠️ Booking ${bookingCode}: FCM push failed for customer ${body.customerUid}, but notification was created:`, fcmError);
+          console.log(`⚠️ Booking ${bookingCode}: Notification is available in Firestore (ID: ${customerNotifRef.id}) - mobile app will receive it when it syncs`);
+        }
+      } else {
+        console.log(`ℹ️ Booking ${bookingCode}: No customerUid provided - notification created but no push sent`);
+      }
     } catch (notifError) {
       // Log error but don't fail the booking creation
       console.error("Error creating customer notification:", notifError);
