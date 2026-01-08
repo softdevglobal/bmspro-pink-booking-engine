@@ -7,6 +7,7 @@ import { getNotificationContent } from "@/lib/notifications";
 import { shouldBlockSlots } from "@/lib/bookingTypes";
 import { checkRateLimit, getClientIdentifier, RateLimiters } from "@/lib/rateLimiter";
 import { validateOwnerUid } from "@/lib/ownerValidation";
+import { sendBookingRequestReceivedEmail } from "@/lib/emailService";
 
 /**
  * Check if a staff ID is a valid assigned staff (not "Any Available" or empty)
@@ -551,13 +552,22 @@ export async function POST(req: NextRequest) {
               
               const existingServiceStaffId = existingService.staffId || existingBooking.staffId || null;
               
-              // Only check if same staff (or both are "any staff")
-              if (newServiceStaffId && existingServiceStaffId) {
-                if (newServiceStaffId !== existingServiceStaffId) continue;
-              } else if (newServiceStaffId || existingServiceStaffId) {
-                // If one has staff and other doesn't, they might conflict
-                // For safety, we'll check them
-              }
+              // Determine if staff assignments conflict
+              const newHasStaff = isValidStaffAssignment(newServiceStaffId);
+              const existingHasStaff = isValidStaffAssignment(existingServiceStaffId);
+              
+              // Only check for conflicts if:
+              // 1. Both have the same specific staff assigned
+              // 2. Both have "any staff" (they compete for the same pool)
+              // 3. One has "any staff" and the other has specific staff (any staff blocks all)
+              const shouldCheckConflict = 
+                (newHasStaff && existingHasStaff && newServiceStaffId === existingServiceStaffId) || // Same specific staff
+                (!newHasStaff && !existingHasStaff) || // Both are "any staff"
+                (!newHasStaff && existingHasStaff) || // New is "any staff", existing has specific staff
+                (newHasStaff && !existingHasStaff); // New has specific staff, existing is "any staff"
+              
+              // Skip if different specific staff members (no conflict)
+              if (!shouldCheckConflict) continue;
 
               const existingStartMinutes = timeToMinutes(existingService.time);
               const existingDuration = existingService.duration || existingBooking.duration || 60;
@@ -565,10 +575,29 @@ export async function POST(req: NextRequest) {
 
               // Check for overlap
               if (timeRangesOverlap(newStartMinutes, newEndMinutes, existingStartMinutes, existingEndMinutes)) {
+                const conflictDetails = {
+                  newService: {
+                    time: newServiceTime,
+                    duration: newServiceDuration,
+                    staffId: newServiceStaffId,
+                    staffType: newHasStaff ? "specific" : "any available"
+                  },
+                  existingService: {
+                    time: existingService.time,
+                    duration: existingDuration,
+                    staffId: existingServiceStaffId,
+                    staffType: existingHasStaff ? "specific" : "any available",
+                    bookingId: existingBooking.id,
+                    bookingCode: existingBooking.bookingCode
+                  }
+                };
+                console.log("[BOOKING CONFLICT] Time slot conflict detected:", conflictDetails);
+                
                 return NextResponse.json(
                   { 
                     error: "Time slot already booked",
-                    details: `The selected time ${newServiceTime} conflicts with an existing booking. Please choose a different time.`
+                    details: `The selected time ${newServiceTime} conflicts with an existing booking${existingBooking.bookingCode ? ` (${existingBooking.bookingCode})` : ''}. Please choose a different time.`,
+                    conflictInfo: conflictDetails
                   },
                   { status: 409 } // 409 Conflict
                 );
@@ -580,13 +609,22 @@ export async function POST(req: NextRequest) {
 
             const existingStaffId = existingBooking.staffId || null;
             
-            // Only check if same staff (or both are "any staff")
-            if (newServiceStaffId && existingStaffId) {
-              if (newServiceStaffId !== existingStaffId) continue;
-            } else if (newServiceStaffId || existingStaffId) {
-              // If one has staff and other doesn't, they might conflict
-              // For safety, we'll check them
-            }
+            // Determine if staff assignments conflict
+            const newHasStaff = isValidStaffAssignment(newServiceStaffId);
+            const existingHasStaff = isValidStaffAssignment(existingStaffId);
+            
+            // Only check for conflicts if:
+            // 1. Both have the same specific staff assigned
+            // 2. Both have "any staff" (they compete for the same pool)
+            // 3. One has "any staff" and the other has specific staff (any staff blocks all)
+            const shouldCheckConflict = 
+              (newHasStaff && existingHasStaff && newServiceStaffId === existingStaffId) || // Same specific staff
+              (!newHasStaff && !existingHasStaff) || // Both are "any staff"
+              (!newHasStaff && existingHasStaff) || // New is "any staff", existing has specific staff
+              (newHasStaff && !existingHasStaff); // New has specific staff, existing is "any staff"
+            
+            // Skip if different specific staff members (no conflict)
+            if (!shouldCheckConflict) continue;
 
             const existingStartMinutes = timeToMinutes(existingBooking.time);
             const existingDuration = existingBooking.duration || 60;
@@ -594,10 +632,29 @@ export async function POST(req: NextRequest) {
 
             // Check for overlap
             if (timeRangesOverlap(newStartMinutes, newEndMinutes, existingStartMinutes, existingEndMinutes)) {
+              const conflictDetails = {
+                newService: {
+                  time: newServiceTime,
+                  duration: newServiceDuration,
+                  staffId: newServiceStaffId,
+                  staffType: newHasStaff ? "specific" : "any available"
+                },
+                existingBooking: {
+                  time: existingBooking.time,
+                  duration: existingDuration,
+                  staffId: existingStaffId,
+                  staffType: existingHasStaff ? "specific" : "any available",
+                  bookingId: existingBooking.id,
+                  bookingCode: existingBooking.bookingCode
+                }
+              };
+              console.log("[BOOKING CONFLICT] Time slot conflict detected:", conflictDetails);
+              
               return NextResponse.json(
                 { 
                   error: "Time slot already booked",
-                  details: `The selected time ${newServiceTime} conflicts with an existing booking. Please choose a different time.`
+                  details: `The selected time ${newServiceTime} conflicts with an existing booking${existingBooking.bookingCode ? ` (${existingBooking.bookingCode})` : ''}. Please choose a different time.`,
+                  conflictInfo: conflictDetails
                 },
                 { status: 409 } // 409 Conflict
               );
@@ -664,6 +721,35 @@ export async function POST(req: NextRequest) {
       updatedAt: FieldValue.serverTimestamp(),
     };
     const ref = await db.collection("bookings").add(payload);
+    
+    // Send email to customer when booking is created (Request Received)
+    try {
+      await sendBookingRequestReceivedEmail(
+        ref.id,
+        bookingCode,
+        body.clientEmail || null,
+        String(body.client),
+        String(body.ownerUid),
+        {
+          branchName: body.branchName || null,
+          bookingDate: String(body.date),
+          bookingTime: String(body.time),
+          duration: Number(body.duration) || null,
+          price: Number(body.price) || null,
+          serviceName: body.serviceName || null,
+          services: processedServices?.map((s: any) => ({
+            name: s.name || "Service",
+            staffName: s.staffName || null,
+            time: s.time || String(body.time),
+            duration: s.duration || Number(body.duration) || null,
+          })),
+          staffName: body.staffName || null,
+        }
+      );
+    } catch (emailError) {
+      console.error("Failed to send booking request received email:", emailError);
+      // Don't fail the request if email sending fails
+    }
     
     // Create notification for the customer (booking received)
     try {
