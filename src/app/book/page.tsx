@@ -814,8 +814,9 @@ function BookPageContent() {
   };
   
   // Filter services and staff based on selection
+  // Service must have at least one branch assigned, and selected branch must be in the list
   const availableServices = bkBranchId
-    ? servicesList.filter((s) => !s.branches || s.branches.length === 0 || s.branches.includes(bkBranchId))
+    ? servicesList.filter((s) => s.branches && s.branches.length > 0 && s.branches.includes(bkBranchId))
     : [];
 
   // Get available staff for a specific service
