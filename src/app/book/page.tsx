@@ -7,6 +7,7 @@ import { shouldBlockSlots } from "@/lib/bookingTypes";
 import { auth, db } from "@/lib/firebase";
 import { signInWithCustomToken, onAuthStateChanged, signOut } from "firebase/auth";
 import { createCustomerDocument, incrementCustomerBookings } from "@/lib/customers";
+import { doc, updateDoc, serverTimestamp } from "firebase/firestore";
 import NotificationPanel from "@/components/NotificationPanel";
 import { getCurrentDateTimeInTimezone } from "@/lib/timezone";
 
@@ -19,11 +20,13 @@ function BookPageContent() {
   // Authentication state
   const [isAuthenticated, setIsAuthenticated] = useState<boolean>(false);
   const [currentCustomer, setCurrentCustomer] = useState<any>(null);
-  const [showAuthModal, setShowAuthModal] = useState<boolean>(true);
+  const [showAuthModal, setShowAuthModal] = useState<boolean>(false);
   const [authMode, setAuthMode] = useState<"login" | "register">("login");
   const [authLoading, setAuthLoading] = useState<boolean>(false);
   const [authError, setAuthError] = useState<string>("");
   const [showLogoutConfirm, setShowLogoutConfirm] = useState<boolean>(false);
+  const [pendingBookingConfirmation, setPendingBookingConfirmation] = useState<boolean>(false);
+  const [pendingStep3Navigation, setPendingStep3Navigation] = useState<boolean>(false);
   
   // Auth form fields
   const [authEmail, setAuthEmail] = useState<string>("");
@@ -35,6 +38,13 @@ function BookPageContent() {
   // Notification panel
   const [showNotificationPanel, setShowNotificationPanel] = useState<boolean>(false);
   const [unreadNotificationCount, setUnreadNotificationCount] = useState<number>(0);
+  
+  // Profile modal
+  const [showProfileModal, setShowProfileModal] = useState<boolean>(false);
+  const [profileFullName, setProfileFullName] = useState<string>("");
+  const [profilePhone, setProfilePhone] = useState<string>("");
+  const [profileLoading, setProfileLoading] = useState<boolean>(false);
+  const [profileError, setProfileError] = useState<string>("");
 
   /**
    * Get the Firebase ID token for authenticated API requests
@@ -218,7 +228,8 @@ function BookPageContent() {
       } else {
         setIsAuthenticated(false);
         setCurrentCustomer(null);
-        setShowAuthModal(true);
+        // Don't show auth modal automatically - let users browse first
+        // Auth modal will show when they try to confirm booking
         // Clear localStorage when not authenticated
         if (typeof window !== "undefined") {
           localStorage.removeItem("customerAuth");
@@ -460,6 +471,21 @@ function BookPageContent() {
       // Clear form
       setAuthEmail("");
       setAuthPassword("");
+      
+      // If there was a pending step 3 navigation, move to step 3
+      if (pendingStep3Navigation) {
+        setPendingStep3Navigation(false);
+        setBkStep(3);
+      }
+      
+      // If there was a pending booking confirmation, proceed with it
+      if (pendingBookingConfirmation) {
+        setPendingBookingConfirmation(false);
+        // Small delay to ensure state is updated
+        setTimeout(() => {
+          handleConfirmBooking();
+        }, 100);
+      }
     } catch (error: any) {
       console.error("Login error:", error);
       if (error.code === "auth/user-not-found" || error.code === "auth/wrong-password" || error.code === "auth/invalid-credential") {
@@ -510,6 +536,65 @@ function BookPageContent() {
 
   const cancelLogout = () => {
     setShowLogoutConfirm(false);
+  };
+
+  // Handle profile modal open
+  const handleOpenProfile = () => {
+    if (currentCustomer) {
+      setProfileFullName(currentCustomer.fullName || "");
+      setProfilePhone(currentCustomer.phone || "");
+      setProfileError("");
+      setShowProfileModal(true);
+    }
+  };
+
+  // Handle profile update
+  const handleUpdateProfile = async () => {
+    if (!currentCustomer || !ownerUid) return;
+    
+    if (!profileFullName.trim()) {
+      setProfileError("Full name is required");
+      return;
+    }
+
+    setProfileLoading(true);
+    setProfileError("");
+
+    try {
+      const customerRef = doc(db, "owners", ownerUid, "customers", currentCustomer.uid);
+      await updateDoc(customerRef, {
+        fullName: profileFullName.trim(),
+        phone: profilePhone.trim() || "",
+        updatedAt: serverTimestamp(),
+      });
+
+      // Update local state
+      setCurrentCustomer({
+        ...currentCustomer,
+        fullName: profileFullName.trim(),
+        phone: profilePhone.trim() || "",
+      });
+
+      // Update localStorage
+      if (typeof window !== "undefined") {
+        const storedAuth = localStorage.getItem("customerAuth");
+        if (storedAuth) {
+          const authData = JSON.parse(storedAuth);
+          localStorage.setItem("customerAuth", JSON.stringify({
+            ...authData,
+            fullName: profileFullName.trim(),
+            phone: profilePhone.trim() || "",
+          }));
+        }
+      }
+
+      setShowProfileModal(false);
+    } catch (error: any) {
+      console.error("Error updating profile:", error);
+      setProfileError(error.message || "Failed to update profile. Please try again.");
+    } finally {
+      setProfileLoading(false);
+    }
   };
 
   // Calendar functions
@@ -867,8 +952,16 @@ function BookPageContent() {
   
   // Handle booking confirmation
   const handleConfirmBooking = async () => {
+    // Check if user is authenticated first
+    if (!isAuthenticated || !currentCustomer) {
+      // Show auth modal and set pending booking flag
+      setPendingBookingConfirmation(true);
+      setShowAuthModal(true);
+      return;
+    }
+    
     // Validate all required fields
-    if (!bkBranchId || bkSelectedServices.length === 0 || !bkDate || !currentCustomer) return;
+    if (!bkBranchId || bkSelectedServices.length === 0 || !bkDate) return;
     
     // Ensure all services have times selected
     if (Object.keys(bkServiceTimes).length !== bkSelectedServices.length) {
@@ -1018,10 +1111,23 @@ function BookPageContent() {
 
         {/* Auth Card */}
         <div className="w-full max-w-md relative z-10">
-          <div className="bg-white/95 backdrop-blur-xl rounded-3xl shadow-2xl border border-white/50 p-8">
+          <div className="bg-white/95 backdrop-blur-xl rounded-3xl shadow-2xl border border-white/50 p-8 pt-12 relative">
+            {/* Close Button */}
+            <button
+              onClick={() => {
+                setShowAuthModal(false);
+                setPendingBookingConfirmation(false);
+                setPendingStep3Navigation(false);
+                setAuthError("");
+              }}
+              className="absolute top-3 right-3 w-10 h-10 flex items-center justify-center text-gray-500 hover:text-gray-700 hover:bg-gray-100 rounded-full transition-all shadow-sm hover:shadow-md z-20"
+              title="Close"
+            >
+              <i className="fas fa-times text-xl"></i>
+            </button>
             
             {/* Toggle Switch */}
-            <div className="relative flex bg-gray-100 rounded-full p-1 mb-8">
+            <div className="relative flex bg-gray-100 rounded-full p-1 mb-8 mt-2">
               <div 
                 className={`absolute top-1 h-[calc(100%-8px)] w-[calc(50%-4px)] bg-slate-900 rounded-full shadow-lg transition-all duration-300 ease-out ${
                   authMode === "register" ? "translate-x-[calc(100%+4px)]" : "translate-x-0"
@@ -1221,6 +1327,30 @@ function BookPageContent() {
           .animate-shake {
             animation: shake 0.3s ease-in-out;
           }
+          @keyframes fadeIn {
+            from {
+              opacity: 0;
+            }
+            to {
+              opacity: 1;
+            }
+          }
+          .animate-fadeIn {
+            animation: fadeIn 0.2s ease-out;
+          }
+          @keyframes slideUp {
+            from {
+              opacity: 0;
+              transform: translateY(20px);
+            }
+            to {
+              opacity: 1;
+              transform: translateY(0);
+            }
+          }
+          .animate-slideUp {
+            animation: slideUp 0.3s ease-out;
+          }
         `}</style>
       </div>
     );
@@ -1241,28 +1371,183 @@ function BookPageContent() {
     <div className="min-h-screen bg-gradient-to-br from-pink-50 via-purple-50 to-indigo-50">
       {/* Header */}
       <div className="relative overflow-hidden bg-indigo-900">
-        {/* Notification and Logout Buttons */}
+        {/* Notification and Auth Buttons */}
         <div className="absolute top-4 sm:top-8 right-4 sm:right-6 z-50 flex items-center gap-2 sm:gap-3">
-          <button
-            onClick={() => setShowNotificationPanel(true)}
-            className="w-9 h-9 sm:w-10 sm:h-10 bg-white/10 backdrop-blur-sm border border-white/20 hover:bg-white/20 text-white font-semibold rounded-lg transition-all hover:scale-105 active:scale-95 flex items-center justify-center relative"
-            title="Notifications"
-          >
-            <i className="fas fa-bell text-sm sm:text-base"></i>
-            {unreadNotificationCount > 0 && (
-              <span className="absolute -top-1 -right-1 w-4 h-4 sm:w-5 sm:h-5 bg-red-500 text-white text-[10px] sm:text-xs font-bold rounded-full flex items-center justify-center shadow-lg border-2 border-purple-700 animate-pulse">
-                {unreadNotificationCount > 9 ? '9+' : unreadNotificationCount}
-              </span>
-            )}
-          </button>
-          <button
-            onClick={handleLogoutClick}
-            className="w-9 h-9 sm:w-10 sm:h-10 bg-white/10 backdrop-blur-sm border border-white/20 hover:bg-white/20 text-white font-semibold rounded-lg transition-all hover:scale-105 active:scale-95 flex items-center justify-center"
-            title="Logout"
-          >
-            <i className="fas fa-sign-out-alt text-sm sm:text-base"></i>
-          </button>
+          {isAuthenticated && (
+            <>
+              <button
+                onClick={() => setShowNotificationPanel(true)}
+                className="w-9 h-9 sm:w-10 sm:h-10 bg-white/10 backdrop-blur-sm border border-white/20 hover:bg-white/20 text-white font-semibold rounded-lg transition-all hover:scale-105 active:scale-95 flex items-center justify-center relative"
+                title="Notifications"
+              >
+                <i className="fas fa-bell text-sm sm:text-base"></i>
+                {unreadNotificationCount > 0 && (
+                  <span className="absolute -top-1 -right-1 w-4 h-4 sm:w-5 sm:h-5 bg-red-500 text-white text-[10px] sm:text-xs font-bold rounded-full flex items-center justify-center shadow-lg border-2 border-purple-700 animate-pulse">
+                    {unreadNotificationCount > 9 ? '9+' : unreadNotificationCount}
+                  </span>
+                )}
+              </button>
+              <button
+                onClick={handleOpenProfile}
+                className="w-9 h-9 sm:w-10 sm:h-10 bg-white/10 backdrop-blur-sm border border-white/20 hover:bg-white/20 text-white font-semibold rounded-lg transition-all hover:scale-105 active:scale-95 flex items-center justify-center"
+                title="Profile"
+              >
+                <i className="fas fa-user-circle text-sm sm:text-base"></i>
+              </button>
+              <button
+                onClick={handleLogoutClick}
+                className="w-9 h-9 sm:w-10 sm:h-10 bg-white/10 backdrop-blur-sm border border-white/20 hover:bg-white/20 text-white font-semibold rounded-lg transition-all hover:scale-105 active:scale-95 flex items-center justify-center"
+                title="Logout"
+              >
+                <i className="fas fa-sign-out-alt text-sm sm:text-base"></i>
+              </button>
+            </>
+          )}
+          {!isAuthenticated && (
+            <button
+              onClick={() => setShowAuthModal(true)}
+              className="px-3 py-2 sm:px-4 sm:py-2.5 bg-white/10 backdrop-blur-sm border border-white/20 hover:bg-white/20 text-white font-semibold rounded-lg transition-all hover:scale-105 active:scale-95 flex items-center justify-center gap-2"
+              title="Login to Book"
+            >
+              <i className="fas fa-sign-in-alt text-xs sm:text-sm"></i>
+              <span className="text-xs sm:text-sm whitespace-nowrap">Login to Book</span>
+            </button>
+          )}
         </div>
+
+        {/* Profile Edit Modal */}
+        {showProfileModal && (
+          <div className="fixed inset-0 bg-black/60 backdrop-blur-sm flex items-center justify-center z-[100] p-4 animate-fadeIn">
+            <div className="bg-white rounded-3xl shadow-2xl max-w-lg w-full overflow-hidden animate-slideUp">
+              {/* Header with Gradient */}
+              <div className="bg-gradient-to-r from-indigo-600 to-purple-600 px-6 sm:px-8 pt-6 sm:pt-8 pb-4 relative">
+                {/* Close Button */}
+                <button
+                  onClick={() => {
+                    setShowProfileModal(false);
+                    setProfileError("");
+                  }}
+                  className="absolute top-4 right-4 w-9 h-9 flex items-center justify-center text-white/80 hover:text-white hover:bg-white/20 rounded-full transition-all"
+                  title="Close"
+                >
+                  <i className="fas fa-times text-lg"></i>
+                </button>
+
+                <div className="flex items-center gap-4">
+                  <div className="w-14 h-14 bg-white/20 backdrop-blur-sm rounded-full flex items-center justify-center">
+                    <i className="fas fa-user-edit text-2xl text-white"></i>
+                  </div>
+                  <div>
+                    <h3 className="text-2xl sm:text-3xl font-bold text-white mb-1">Edit Profile</h3>
+                    <p className="text-white/90 text-sm">Update your profile information</p>
+                  </div>
+                </div>
+              </div>
+
+              {/* Content */}
+              <div className="p-6 sm:p-8">
+                {/* Error Message */}
+                {profileError && (
+                  <div className="mb-6 p-4 bg-red-50 border border-red-200 rounded-xl animate-shake">
+                    <div className="flex items-center gap-3">
+                      <div className="flex-shrink-0 w-8 h-8 bg-red-100 rounded-full flex items-center justify-center">
+                        <i className="fas fa-exclamation-circle text-red-600"></i>
+                      </div>
+                      <p className="text-red-700 text-sm font-medium">{profileError}</p>
+                    </div>
+                  </div>
+                )}
+
+                {/* Profile Form */}
+                <div className="space-y-5">
+                  {/* Email (Read-only) */}
+                  <div>
+                    <label className="block text-sm font-bold text-gray-700 mb-2.5">
+                      <i className="fas fa-envelope text-indigo-600 mr-2"></i>
+                      Email Address
+                    </label>
+                    <div className="relative">
+                      <input
+                        type="email"
+                        value={currentCustomer?.email || ""}
+                        disabled
+                        className="w-full px-4 py-3.5 bg-gray-50 border border-gray-200 rounded-xl text-gray-600 cursor-not-allowed pr-12"
+                      />
+                      <div className="absolute right-4 top-1/2 -translate-y-1/2">
+                        <i className="fas fa-lock text-gray-400 text-sm"></i>
+                      </div>
+                    </div>
+                    <p className="text-xs text-gray-500 mt-2 flex items-center gap-1">
+                      <i className="fas fa-info-circle text-gray-400"></i>
+                      Email cannot be changed
+                    </p>
+                  </div>
+
+                  {/* Full Name */}
+                  <div>
+                    <label className="block text-sm font-bold text-gray-700 mb-2.5">
+                      <i className="fas fa-user text-indigo-600 mr-2"></i>
+                      Full Name <span className="text-red-500">*</span>
+                    </label>
+                    <input
+                      type="text"
+                      value={profileFullName}
+                      onChange={(e) => setProfileFullName(e.target.value)}
+                      placeholder="Enter your full name"
+                      className="w-full px-4 py-3.5 bg-white border-2 border-gray-200 rounded-xl focus:ring-2 focus:ring-indigo-500 focus:border-indigo-500 text-gray-900 transition-all placeholder:text-gray-400"
+                    />
+                  </div>
+
+                  {/* Phone */}
+                  <div>
+                    <label className="block text-sm font-bold text-gray-700 mb-2.5">
+                      <i className="fas fa-phone text-indigo-600 mr-2"></i>
+                      Phone Number
+                    </label>
+                    <input
+                      type="tel"
+                      value={profilePhone}
+                      onChange={(e) => setProfilePhone(e.target.value)}
+                      placeholder="Enter your phone number"
+                      className="w-full px-4 py-3.5 bg-white border-2 border-gray-200 rounded-xl focus:ring-2 focus:ring-indigo-500 focus:border-indigo-500 text-gray-900 transition-all placeholder:text-gray-400"
+                    />
+                  </div>
+                </div>
+
+                {/* Action Buttons */}
+                <div className="flex flex-col sm:flex-row gap-3 mt-8 pt-6 border-t border-gray-200">
+                  <button
+                    onClick={() => {
+                      setShowProfileModal(false);
+                      setProfileError("");
+                    }}
+                    className="flex-1 px-6 py-3.5 border-2 border-gray-300 text-gray-700 font-semibold rounded-xl hover:bg-gray-50 hover:border-gray-400 transition-all"
+                  >
+                    <i className="fas fa-times mr-2"></i>
+                    Cancel
+                  </button>
+                  <button
+                    onClick={handleUpdateProfile}
+                    disabled={profileLoading}
+                    className="flex-1 px-6 py-3.5 bg-gradient-to-r from-indigo-600 to-purple-600 text-white font-semibold rounded-xl hover:from-indigo-700 hover:to-purple-700 transition-all disabled:from-gray-400 disabled:to-gray-500 disabled:cursor-not-allowed shadow-lg hover:shadow-xl"
+                  >
+                    {profileLoading ? (
+                      <>
+                        <i className="fas fa-spinner fa-spin mr-2"></i>
+                        Saving...
+                      </>
+                    ) : (
+                      <>
+                        <i className="fas fa-save mr-2"></i>
+                        Save Changes
+                      </>
+                    )}
+                  </button>
+                </div>
+              </div>
+            </div>
+          </div>
+        )}
 
         {/* Logout Confirmation Modal */}
         {showLogoutConfirm && (
@@ -1877,7 +2162,17 @@ function BookPageContent() {
                   Back
                 </button>
                 <button
-                  onClick={() => setBkStep(3)}
+                  onClick={() => {
+                    // Check if user is authenticated before proceeding to confirmation
+                    if (!isAuthenticated || !currentCustomer) {
+                      // Show auth modal and set pending step 3 navigation flag
+                      setPendingStep3Navigation(true);
+                      setShowAuthModal(true);
+                    } else {
+                      // User is authenticated, proceed to step 3
+                      setBkStep(3);
+                    }
+                  }}
                   disabled={!bkDate || Object.keys(bkServiceTimes).length !== bkSelectedServices.length}
                   className={`px-6 sm:px-8 py-3 rounded-lg font-semibold text-sm sm:text-base text-white transition-all ${
                     bkDate && Object.keys(bkServiceTimes).length === bkSelectedServices.length
