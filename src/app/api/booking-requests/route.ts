@@ -21,12 +21,54 @@ function isValidStaffAssignment(staffId?: string | null): boolean {
 }
 
 /**
+ * Check if a staff ID represents "Any Staff" (unassigned)
+ */
+function isAnyStaff(staffId?: string | null): boolean {
+  if (!staffId) return true; // null, undefined, or empty
+  const str = String(staffId).trim().toLowerCase();
+  return str === "" || str === "null" || str.includes("any");
+}
+
+/**
+ * Check if a booking has "Any Staff" assignments
+ * This checks both staffId and staffName for "Any Staff" indicators
+ */
+function hasAnyStaffBooking(
+  services?: Array<{ staffId?: string | null; staffName?: string | null }> | null,
+  staffId?: string | null,
+  staffName?: string | null
+): boolean {
+  // Check services array for multi-service bookings
+  if (services && Array.isArray(services) && services.length > 0) {
+    return services.some(s => {
+      // Check both staffId and staffName for "Any Staff" indicators
+      const hasAnyStaffId = isAnyStaff(s.staffId);
+      const hasAnyStaffName = !!(s.staffName && (
+        s.staffName.toLowerCase().includes("any available") ||
+        s.staffName.toLowerCase().includes("any staff") ||
+        s.staffName.toLowerCase() === "any"
+      ));
+      return hasAnyStaffId || hasAnyStaffName;
+    });
+  }
+  // Single service booking - check both staffId and staffName
+  const hasAnyStaffId = isAnyStaff(staffId);
+  const hasAnyStaffName = !!(staffName && (
+    staffName.toLowerCase().includes("any available") ||
+    staffName.toLowerCase().includes("any staff") ||
+    staffName.toLowerCase() === "any"
+  ));
+  return hasAnyStaffId || hasAnyStaffName;
+}
+
+/**
  * Analyze staff assignments in a booking
  * Returns details about which services have staff and which don't
  */
 function analyzeStaffAssignments(
   services?: Array<{ staffId?: string | null; staffName?: string | null }>,
-  staffId?: string | null
+  staffId?: string | null,
+  staffName?: string | null
 ): { 
   hasAnyAssignedStaff: boolean;  // At least one service has staff
   hasAnyUnassignedStaff: boolean;  // At least one service needs staff assignment
@@ -35,7 +77,16 @@ function analyzeStaffAssignments(
 } {
   // Check services array for multi-service bookings
   if (services && Array.isArray(services) && services.length > 0) {
-    const assignedCount = services.filter(s => isValidStaffAssignment(s.staffId)).length;
+    const assignedCount = services.filter(s => {
+      // Check both staffId and staffName - if either indicates "any staff", it's unassigned
+      const isAnyStaffId = isAnyStaff(s.staffId);
+      const isAnyStaffName = !!(s.staffName && (
+        s.staffName.toLowerCase().includes("any available") ||
+        s.staffName.toLowerCase().includes("any staff") ||
+        s.staffName.toLowerCase() === "any"
+      ));
+      return !isAnyStaffId && !isAnyStaffName;
+    }).length;
     const totalCount = services.length;
     
     return {
@@ -46,8 +97,15 @@ function analyzeStaffAssignments(
     };
   }
   
-  // Single service booking
-  const isAssigned = isValidStaffAssignment(staffId);
+  // Single service booking - check both staffId and staffName
+  const isAnyStaffId = isAnyStaff(staffId);
+  const isAnyStaffName = !!(staffName && (
+    staffName.toLowerCase().includes("any available") ||
+    staffName.toLowerCase().includes("any staff") ||
+    staffName.toLowerCase() === "any"
+  ));
+  const isAssigned = !isAnyStaffId && !isAnyStaffName;
+  
   return {
     hasAnyAssignedStaff: isAssigned,
     hasAnyUnassignedStaff: !isAssigned,
@@ -673,17 +731,32 @@ export async function POST(req: NextRequest) {
     const bookingCode = generateBookingCode();
     
     // Analyze staff assignments to determine workflow
-    const staffAnalysis = analyzeStaffAssignments(body.services, body.staffId);
+    const staffAnalysis = analyzeStaffAssignments(body.services, body.staffId, body.staffName);
+    
+    // Check if this is an "Any Staff" booking (needs staff assignment)
+    const hasAnyStaff = hasAnyStaffBooking(body.services, body.staffId, body.staffName);
+    console.log(`📋 Booking ${bookingCode}: Checking for Any Staff booking - hasAnyStaff: ${hasAnyStaff}, staffId: ${body.staffId}, staffName: ${body.staffName}, processedServices: ${JSON.stringify(body.services?.map(s => ({ name: s.name, staffId: s.staffId, staffName: s.staffName })))}`);
     
     // Initialize services with approval status
     let processedServices = body.services || null;
     if (processedServices && Array.isArray(processedServices) && processedServices.length > 0) {
-      processedServices = processedServices.map(service => ({
-        ...service,
-        // Services with valid staff get "pending" approval status
-        // Services without staff (Any Available) get "needs_assignment" status
-        approvalStatus: isValidStaffAssignment(service.staffId) ? "pending" : "needs_assignment",
-      }));
+      processedServices = processedServices.map(service => {
+        // Check both staffId and staffName to determine if staff is assigned
+        const isAnyStaffId = isAnyStaff(service.staffId);
+        const isAnyStaffName = !!(service.staffName && (
+          service.staffName.toLowerCase().includes("any available") ||
+          service.staffName.toLowerCase().includes("any staff") ||
+          service.staffName.toLowerCase() === "any"
+        ));
+        const hasAssignedStaff = !isAnyStaffId && !isAnyStaffName;
+        
+        return {
+          ...service,
+          // Services with valid staff get "pending" approval status
+          // Services without staff (Any Available) get "needs_assignment" status
+          approvalStatus: hasAssignedStaff ? "pending" : "needs_assignment",
+        };
+      });
     }
     
     // Determine initial status based on staff assignments:
@@ -878,12 +951,22 @@ export async function POST(req: NextRequest) {
     }
     
     // If any services need staff assignment, notify admin (owner and branch admins)
-    if (staffAnalysis.hasAnyUnassignedStaff) {
+    // CRITICAL: Also check hasAnyStaff to ensure we catch all "Any Staff" bookings
+    if (staffAnalysis.hasAnyUnassignedStaff || hasAnyStaff) {
       try {
         console.log(`📋 Booking ${bookingCode}: Detected unassigned staff - hasAnyUnassignedStaff: ${staffAnalysis.hasAnyUnassignedStaff}, noneAssigned: ${staffAnalysis.noneAssigned}`);
         
         // Create admin notification for partial assignment needed
-        const unassignedServices = processedServices?.filter(s => !isValidStaffAssignment(s.staffId)) || [];
+        // Check both staffId and staffName to identify unassigned services
+        const unassignedServices = processedServices?.filter(s => {
+          const isAnyStaffId = isAnyStaff(s.staffId);
+          const isAnyStaffName = !!(s.staffName && (
+            s.staffName.toLowerCase().includes("any available") ||
+            s.staffName.toLowerCase().includes("any staff") ||
+            s.staffName.toLowerCase() === "any"
+          ));
+          return isAnyStaffId || isAnyStaffName;
+        }) || [];
         const unassignedServiceNames = unassignedServices.map(s => s.name || "Service").join(", ");
         
         const title = staffAnalysis.noneAssigned 
@@ -914,7 +997,15 @@ export async function POST(req: NextRequest) {
             name: s.name || "Service",
             staffName: s.staffName || "Needs Assignment",
             staffId: s.staffId || null,
-            needsAssignment: !isValidStaffAssignment(s.staffId),
+            needsAssignment: (() => {
+              const isAnyStaffId = isAnyStaff(s.staffId);
+              const isAnyStaffName = !!(s.staffName && (
+                s.staffName.toLowerCase().includes("any available") ||
+                s.staffName.toLowerCase().includes("any staff") ||
+                s.staffName.toLowerCase() === "any"
+              ));
+              return isAnyStaffId || isAnyStaffName;
+            })(),
           })) || null,
           branchName: body.branchName || null,
           branchId: body.branchId ? String(body.branchId) : null, // Include branchId for branch admin filtering
@@ -975,7 +1066,15 @@ export async function POST(req: NextRequest) {
               name: s.name || "Service",
               staffName: s.staffName || "Needs Assignment",
               staffId: s.staffId || null,
-              needsAssignment: !isValidStaffAssignment(s.staffId),
+              needsAssignment: (() => {
+              const isAnyStaffId = isAnyStaff(s.staffId);
+              const isAnyStaffName = !!(s.staffName && (
+                s.staffName.toLowerCase().includes("any available") ||
+                s.staffName.toLowerCase().includes("any staff") ||
+                s.staffName.toLowerCase() === "any"
+              ));
+              return isAnyStaffId || isAnyStaffName;
+            })(),
             })) || null,
             branchName: body.branchName || null,
             branchId: body.branchId ? String(body.branchId) : null,
@@ -1013,6 +1112,100 @@ export async function POST(req: NextRequest) {
       console.log(`Booking ${bookingCode}: All services have assigned staff - no admin notification needed`);
     }
     
+    // CRITICAL: ALWAYS notify branch admins for "Any Staff" bookings, even if hasAnyUnassignedStaff was false
+    // This ensures branch admins receive notifications for ALL "Any Staff" bookings
+    if (hasAnyStaff && !staffAnalysis.hasAnyUnassignedStaff) {
+      try {
+        console.log(`📋 Booking ${bookingCode}: Detected Any Staff booking (but hasAnyUnassignedStaff was false) - explicitly notifying branch admins`);
+        
+        const serviceList = processedServices && Array.isArray(processedServices) && processedServices.length > 0
+          ? processedServices.map(s => s.name || "Service").join(", ")
+          : body.serviceName || "Service";
+        
+        const title = "New Booking - Staff Assignment Required";
+        const message = `New booking from ${body.client} for ${serviceList} on ${body.date} at ${body.time}. Please assign staff.`;
+        
+        // Notify all branch admins for this branch
+        const branchAdminUids = await getBranchAdminUids(db, String(body.branchId), String(body.ownerUid));
+        console.log(`📋 Booking ${bookingCode}: Found ${branchAdminUids.length} branch admin(s) for Any Staff booking`);
+        
+        for (const branchAdminUid of branchAdminUids) {
+          // Skip if branch admin is the owner or the assigned staff
+          if (branchAdminUid === String(body.ownerUid) || branchAdminUid === body.staffId) {
+            console.log(`⏭️ Booking ${bookingCode}: Skipping branch admin ${branchAdminUid} (is owner or assigned staff)`);
+            continue;
+          }
+          
+          console.log(`📋 Booking ${bookingCode}: Creating notification for branch admin ${branchAdminUid} (Any Staff booking)`);
+          
+          // Create notification for branch admin
+          const branchAdminNotificationPayload = {
+            bookingId: ref.id,
+            bookingCode: bookingCode,
+            type: "booking_needs_assignment",
+            title,
+            message,
+            status: initialStatus,
+            ownerUid: String(body.ownerUid),
+            branchAdminUid: branchAdminUid,
+            targetAdminUid: branchAdminUid, // Target branch admin
+            targetRole: "admin",
+            clientName: String(body.client),
+            clientPhone: body.clientPhone || null,
+            serviceName: body.serviceName || null,
+            services: processedServices?.map(s => ({
+              name: s.name || "Service",
+              staffName: s.staffName || "Needs Assignment",
+              staffId: s.staffId || null,
+              needsAssignment: (() => {
+                const isAnyStaffId = isAnyStaff(s.staffId);
+                const isAnyStaffName = !!(s.staffName && (
+                  s.staffName.toLowerCase().includes("any available") ||
+                  s.staffName.toLowerCase().includes("any staff") ||
+                  s.staffName.toLowerCase() === "any"
+                ));
+                return isAnyStaffId || isAnyStaffName;
+              })(),
+            })) || null,
+            branchName: body.branchName || null,
+            branchId: body.branchId ? String(body.branchId) : null,
+            bookingDate: body.date || null,
+            bookingTime: body.time || null,
+            read: false,
+            createdAt: FieldValue.serverTimestamp(),
+          };
+          
+          const branchAdminNotifRef = await db.collection("notifications").add(branchAdminNotificationPayload);
+          console.log(`✅ Booking ${bookingCode}: Branch admin notification created in Firestore with ID: ${branchAdminNotifRef.id}`);
+          
+          // Send FCM push notification to branch admin
+          const branchAdminFcmToken = await getUserFcmToken(db, branchAdminUid);
+          if (branchAdminFcmToken) {
+            console.log(`📱 Booking ${bookingCode}: Found FCM token for branch admin ${branchAdminUid}, sending push notification...`);
+            await sendPushNotification(branchAdminFcmToken, title, message, {
+              notificationId: branchAdminNotifRef.id,
+              type: "booking_needs_assignment",
+              bookingId: ref.id,
+              bookingCode: bookingCode || "",
+            });
+            console.log(`✅ Booking ${bookingCode}: FCM push sent to branch admin ${branchAdminUid} for Any Staff booking`);
+          } else {
+            console.log(`⚠️ Booking ${bookingCode}: No FCM token found for branch admin ${branchAdminUid}, skipping push notification`);
+            console.log(`⚠️ Booking ${bookingCode}: Notification was still created in Firestore (ID: ${branchAdminNotifRef.id}) - mobile app will receive it when it syncs`);
+          }
+        }
+        
+        if (branchAdminUids.length > 0) {
+          console.log(`✅ Booking ${bookingCode}: Notified ${branchAdminUids.length} branch admin(s) for Any Staff booking`);
+        } else {
+          console.log(`⚠️ Booking ${bookingCode}: No branch admins found for branch ${body.branchId}`);
+        }
+      } catch (anyStaffNotifError) {
+        console.error("❌ Failed to send branch admin notifications for Any Staff booking:", anyStaffNotifError);
+        // Don't fail the request if notification sending fails
+      }
+    }
+    
     // Send notification to all branch admins for this branch (for all bookings, not just unassigned)
     try {
       const branchAdminUids = await getBranchAdminUids(db, String(body.branchId), String(body.ownerUid));
@@ -1022,8 +1215,8 @@ export async function POST(req: NextRequest) {
           continue;
         }
         
-        // Skip if we already notified this branch admin above (for unassigned bookings)
-        if (staffAnalysis.hasAnyUnassignedStaff) {
+        // Skip if we already notified this branch admin above (for unassigned bookings or Any Staff bookings)
+        if (staffAnalysis.hasAnyUnassignedStaff || hasAnyStaff) {
           // Already notified in the unassigned booking section above
           continue;
         }
