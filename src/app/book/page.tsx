@@ -136,7 +136,7 @@ function BookPageContent() {
   const [salonLogo, setSalonLogo] = useState<string>("");
   const [branches, setBranches] = useState<Array<{ id: string; name: string; address?: string; hours?: any; timezone?: string }>>([]);
   const [servicesList, setServicesList] = useState<Array<{ id: string | number; name: string; price?: number; duration?: number; icon?: string; branches?: string[]; staffIds?: string[] }>>([]);
-  const [staffList, setStaffList] = useState<Array<{ id: string; name: string; role?: string; status?: string; avatar?: string; branchId?: string; branch?: string }>>([]);
+  const [staffList, setStaffList] = useState<Array<{ id: string; name: string; role?: string; status?: string; avatar?: string; avatarUrl?: string; photoURL?: string; branchId?: string; branch?: string }>>([]);
   const [bookings, setBookings] = useState<Array<{ id: string; staffId?: string; date: string; time: string; duration: number; status: string; services?: Array<{ staffId?: string; time?: string; duration?: number }> }>>([]);
   const [loading, setLoading] = useState<boolean>(true);
 
@@ -2050,11 +2050,58 @@ function BookPageContent() {
                                     }`}
                                   >
                                     <div className="w-6 h-6 rounded-full overflow-hidden bg-gray-200 flex-shrink-0">
-                                      {st.avatar ? (
-                                        <img src={`https://api.dicebear.com/7.x/avataaars/svg?seed=${encodeURIComponent(st.avatar)}`} alt="" className="w-full h-full object-cover" />
-                                      ) : (
-                                        <div className="w-full h-full flex items-center justify-center bg-gray-300"><i className="fas fa-user text-[10px] text-gray-500"></i></div>
-                                      )}
+                                      {(() => {
+                                        // Check for profile image URL - prioritize photoURL, then avatarUrl, then avatar if it's a URL
+                                        let profileImageUrl: string | null = null;
+                                        
+                                        if (st.photoURL && typeof st.photoURL === 'string' && st.photoURL.trim()) {
+                                          profileImageUrl = st.photoURL;
+                                        } else if (st.avatarUrl && typeof st.avatarUrl === 'string' && st.avatarUrl.trim()) {
+                                          profileImageUrl = st.avatarUrl;
+                                        } else if (st.avatar && typeof st.avatar === 'string' && st.avatar.trim()) {
+                                          // Check if avatar is a URL (starts with http/https)
+                                          if (st.avatar.startsWith('http://') || st.avatar.startsWith('https://')) {
+                                            profileImageUrl = st.avatar;
+                                          }
+                                        }
+                                        
+                                        if (profileImageUrl) {
+                                          return (
+                                            <img 
+                                              src={profileImageUrl} 
+                                              alt={st.name || 'Staff'} 
+                                              className="w-full h-full object-cover"
+                                              onError={(e) => {
+                                                // Fallback to default icon if image fails to load
+                                                const target = e.target as HTMLImageElement;
+                                                target.style.display = 'none';
+                                                const parent = target.parentElement;
+                                                if (parent) {
+                                                  parent.innerHTML = '<div class="w-full h-full flex items-center justify-center bg-gray-300"><i class="fas fa-user text-[10px] text-gray-500"></i></div>';
+                                                }
+                                              }}
+                                            />
+                                          );
+                                        } else {
+                                          // Use dicebear with staff name as seed, or default icon
+                                          return (
+                                            <img 
+                                              src={`https://api.dicebear.com/7.x/avataaars/svg?seed=${encodeURIComponent(st.name || st.id || 'staff')}`} 
+                                              alt={st.name || 'Staff'} 
+                                              className="w-full h-full object-cover"
+                                              onError={(e) => {
+                                                // Fallback to default icon if dicebear fails
+                                                const target = e.target as HTMLImageElement;
+                                                target.style.display = 'none';
+                                                const parent = target.parentElement;
+                                                if (parent) {
+                                                  parent.innerHTML = '<div class="w-full h-full flex items-center justify-center bg-gray-300"><i class="fas fa-user text-[10px] text-gray-500"></i></div>';
+                                                }
+                                              }}
+                                            />
+                                          );
+                                        }
+                                      })()}
                                     </div>
                                     <span className="text-xs font-medium">{st.name}</span>
                                     {selectedStaffId === st.id && <i className="fas fa-check-circle text-indigo-600 text-xs ml-1 flex-shrink-0"></i>}
