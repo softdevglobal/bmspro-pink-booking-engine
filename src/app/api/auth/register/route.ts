@@ -4,6 +4,7 @@ import { getAuth } from "firebase-admin/auth";
 import { getAdminApp } from "@/lib/firebaseAdmin";
 import { checkRateLimit, getClientIdentifier, RateLimiters } from "@/lib/rateLimiter";
 import { validateOwnerUid } from "@/lib/ownerValidation";
+import { sendWelcomeEmail } from "@/lib/emailService";
 
 export async function POST(request: NextRequest) {
   try {
@@ -154,6 +155,14 @@ export async function POST(request: NextRequest) {
       updatedAt: new Date().toISOString(),
       totalBookings: 0,
     });
+
+    // Send welcome email (don't block registration if email fails)
+    try {
+      await sendWelcomeEmail(email, trimmedName, ownerUid);
+    } catch (emailError: any) {
+      console.error("Failed to send welcome email:", emailError);
+      // Don't fail registration if email fails
+    }
 
     return NextResponse.json(
       {

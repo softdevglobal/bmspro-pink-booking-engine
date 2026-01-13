@@ -28,6 +28,16 @@ function BookPageContent() {
   const [pendingBookingConfirmation, setPendingBookingConfirmation] = useState<boolean>(false);
   const [pendingStep3Navigation, setPendingStep3Navigation] = useState<boolean>(false);
   
+  // Forgot password state
+  const [forgotPasswordMode, setForgotPasswordMode] = useState<"request" | "verify" | "reset" | null>(null);
+  const [resetCode, setResetCode] = useState<string>("");
+  const [newPassword, setNewPassword] = useState<string>("");
+  const [confirmPassword, setConfirmPassword] = useState<string>("");
+  const [showNewPassword, setShowNewPassword] = useState<boolean>(false);
+  const [showConfirmPassword, setShowConfirmPassword] = useState<boolean>(false);
+  const [forgotPasswordLoading, setForgotPasswordLoading] = useState<boolean>(false);
+  const [forgotPasswordSuccess, setForgotPasswordSuccess] = useState<string>("");
+  
   // Auth form fields
   const [authEmail, setAuthEmail] = useState<string>("");
   const [authPassword, setAuthPassword] = useState<string>("");
@@ -1119,6 +1129,11 @@ function BookPageContent() {
                 setPendingBookingConfirmation(false);
                 setPendingStep3Navigation(false);
                 setAuthError("");
+                setForgotPasswordMode(null);
+                setForgotPasswordSuccess("");
+                setResetCode("");
+                setNewPassword("");
+                setConfirmPassword("");
               }}
               className="absolute top-3 right-3 w-10 h-10 flex items-center justify-center text-gray-500 hover:text-gray-700 hover:bg-gray-100 rounded-full transition-all shadow-sm hover:shadow-md z-20"
               title="Close"
@@ -1138,6 +1153,7 @@ function BookPageContent() {
                 onClick={() => {
                   setAuthMode("login");
                   setAuthError("");
+                  setForgotPasswordMode(null);
                 }}
                 disabled={authLoading}
                 className={`flex-1 py-3 rounded-full font-bold text-sm relative z-10 transition-all duration-300 ${
@@ -1153,6 +1169,7 @@ function BookPageContent() {
                 onClick={() => {
                   setAuthMode("register");
                   setAuthError("");
+                  setForgotPasswordMode(null);
                 }}
                 disabled={authLoading}
                 className={`flex-1 py-3 rounded-full font-bold text-sm relative z-10 transition-all duration-300 ${
@@ -1166,139 +1183,615 @@ function BookPageContent() {
               </button>
             </div>
             
-            {/* Title */}
-            <div className="text-center mb-6">
-              <h2 className="text-3xl font-black text-slate-900 mb-2">
-                {authMode === "login" ? "Welcome Back!" : "Join Us Today!"}
-              </h2>
-              <p className="text-gray-600 text-sm">
-                {authMode === "login" 
-                  ? "Sign in to book your appointment" 
-                  : "Create your account to get started"}
-              </p>
-            </div>
-
-            {/* Error Message */}
-            {authError && (
-              <div className="mb-4 p-4 bg-red-50 border-l-4 border-red-500 rounded-lg animate-shake">
-                <div className="flex items-center gap-2">
-                  <i className="fas fa-exclamation-circle text-red-600"></i>
-                  <p className="text-red-700 text-sm font-medium">{authError}</p>
-                </div>
-              </div>
-            )}
-
-            {/* Form */}
-            <form 
-              onSubmit={(e) => {
-                e.preventDefault();
-                if (authMode === "login") {
-                  handleLogin();
-                } else {
-                  handleRegister();
-                }
-              }}
-              className="space-y-4"
-            >
-              {authMode === "register" && (
-                <>
-                    <div className="relative">
-                <div className="absolute left-4 top-1/2 -translate-y-1/2 text-slate-600">
-                  <i className="fas fa-user"></i>
-                </div>
-                      <input
-                        type="text"
-                        placeholder="Full Name"
-                        value={authFullName}
-                        onChange={(e) => setAuthFullName(e.target.value)}
-                        className="w-full pl-12 pr-4 py-3 bg-gray-50 border-2 border-gray-200 rounded-xl focus:outline-none focus:border-slate-900 focus:bg-white transition-all text-slate-900"
-                        disabled={authLoading}
-                      />
+            {/* Show Forgot Password Flow or Regular Login/Register */}
+            {forgotPasswordMode !== null ? (
+              /* Forgot Password Flow - Replaces login/register form */
+              <div>
+                {/* Request Code Step */}
+                {forgotPasswordMode === "request" && (
+                  <div className="space-y-4">
+                    <div className="text-center mb-4">
+                      <h3 className="text-xl font-bold text-slate-900 mb-2">Forgot Password?</h3>
+                      <p className="text-sm text-gray-600">Enter your email to receive a 6-digit reset code</p>
                     </div>
-                    <div className="relative">
-                <div className="absolute left-4 top-1/2 -translate-y-1/2 text-slate-600">
-                  <i className="fas fa-phone"></i>
+                    
+                    {forgotPasswordSuccess && (
+                      <div className="p-4 bg-green-50 border-l-4 border-green-500 rounded-lg">
+                        <div className="flex items-center gap-2">
+                          <i className="fas fa-check-circle text-green-600"></i>
+                          <p className="text-green-700 text-sm font-medium">{forgotPasswordSuccess}</p>
+                        </div>
+                      </div>
+                    )}
+
+                    <form
+                      onSubmit={async (e) => {
+                        e.preventDefault();
+                        if (!authEmail.trim()) {
+                          setAuthError("Please enter your email address");
+                          return;
+                        }
+
+                        setForgotPasswordLoading(true);
+                        setAuthError("");
+                        setForgotPasswordSuccess("");
+
+                        try {
+                          const response = await fetch("/api/auth/forgot-password", {
+                            method: "POST",
+                            headers: { "Content-Type": "application/json" },
+                            body: JSON.stringify({
+                              email: authEmail,
+                              ownerUid: ownerUid,
+                            }),
+                          });
+
+                          const data = await response.json();
+
+                          if (response.ok && data.success) {
+                            setForgotPasswordSuccess(data.message || "Reset code sent to your email!");
+                            setForgotPasswordMode("verify");
+                          } else {
+                            setAuthError(data.error || "Failed to send reset code. Please try again.");
+                          }
+                        } catch (error: any) {
+                          setAuthError(error.message || "Failed to send reset code. Please try again.");
+                        } finally {
+                          setForgotPasswordLoading(false);
+                        }
+                      }}
+                      className="space-y-4"
+                    >
+                      <div className="relative">
+                        <div className="absolute left-4 top-1/2 -translate-y-1/2 text-slate-600">
+                          <i className="fas fa-envelope"></i>
+                        </div>
+                        <input
+                          type="email"
+                          placeholder="Email Address"
+                          value={authEmail}
+                          onChange={(e) => setAuthEmail(e.target.value)}
+                          className="w-full pl-12 pr-4 py-3 bg-gray-50 border-2 border-gray-200 rounded-xl focus:outline-none focus:border-slate-900 focus:bg-white transition-all text-slate-900"
+                          disabled={forgotPasswordLoading}
+                          required
+                        />
+                      </div>
+
+                      <button
+                        type="submit"
+                        disabled={forgotPasswordLoading}
+                        className={`w-full py-3 rounded-xl font-bold text-white transition-all ${
+                          forgotPasswordLoading
+                            ? "bg-gray-400 cursor-not-allowed"
+                            : "bg-indigo-600 hover:bg-indigo-700"
+                        }`}
+                      >
+                        {forgotPasswordLoading ? (
+                          <span className="flex items-center justify-center gap-2">
+                            <i className="fas fa-spinner fa-spin"></i>
+                            Sending...
+                          </span>
+                        ) : (
+                          <span className="flex items-center justify-center gap-2">
+                            <i className="fas fa-paper-plane mr-2"></i>
+                            Send Reset Code
+                          </span>
+                        )}
+                      </button>
+
+                      <button
+                        type="button"
+                        onClick={() => {
+                          setForgotPasswordMode(null);
+                          setForgotPasswordSuccess("");
+                          setAuthError("");
+                        }}
+                        className="w-full py-2 text-sm text-slate-600 hover:text-slate-900 transition-colors"
+                      >
+                        <i className="fas fa-arrow-left mr-1"></i>
+                        Back to Login
+                      </button>
+                    </form>
+                  </div>
+                )}
+
+                {/* Verify Code Step */}
+                {forgotPasswordMode === "verify" && (
+                  <div className="space-y-4">
+                    {/* Title */}
+                    <div className="text-center mb-6">
+                      <h2 className="text-3xl font-black text-slate-900 mb-2">Enter Reset Code</h2>
+                      <p className="text-gray-600 text-sm">Check your email for the 6-digit code</p>
+                    </div>
+
+                    {/* Error Message */}
+                    {authError && (
+                      <div className="mb-4 p-4 bg-red-50 border-l-4 border-red-500 rounded-lg animate-shake">
+                        <div className="flex items-center gap-2">
+                          <i className="fas fa-exclamation-circle text-red-600"></i>
+                          <p className="text-red-700 text-sm font-medium">{authError}</p>
+                        </div>
+                      </div>
+                    )}
+
+                    {/* Success Message */}
+                    {forgotPasswordSuccess && (
+                      <div className="mb-4 p-4 bg-green-50 border-l-4 border-green-500 rounded-lg">
+                        <div className="flex items-center gap-2">
+                          <i className="fas fa-check-circle text-green-600"></i>
+                          <p className="text-green-700 text-sm font-medium">{forgotPasswordSuccess}</p>
+                        </div>
+                      </div>
+                    )}
+
+                    <form
+                      onSubmit={async (e) => {
+                        e.preventDefault();
+                        if (resetCode.length !== 6 || !/^\d{6}$/.test(resetCode)) {
+                          setAuthError("Please enter a valid 6-digit code");
+                          return;
+                        }
+
+                        setForgotPasswordLoading(true);
+                        setAuthError("");
+
+                        try {
+                          const response = await fetch("/api/auth/verify-reset-code", {
+                            method: "POST",
+                            headers: { "Content-Type": "application/json" },
+                            body: JSON.stringify({
+                              email: authEmail,
+                              code: resetCode,
+                              ownerUid: ownerUid,
+                            }),
+                          });
+
+                          const data = await response.json();
+
+                          if (response.ok && data.success) {
+                            setForgotPasswordMode("reset");
+                            setAuthError("");
+                          } else {
+                            setAuthError(data.error || "Invalid or expired code. Please try again.");
+                          }
+                        } catch (error: any) {
+                          setAuthError(error.message || "Failed to verify code. Please try again.");
+                        } finally {
+                          setForgotPasswordLoading(false);
+                        }
+                      }}
+                      className="space-y-4"
+                    >
+                      <div className="relative">
+                        <div className="absolute left-4 top-1/2 -translate-y-1/2 text-slate-600">
+                          <i className="fas fa-key"></i>
+                        </div>
+                        <input
+                          type="text"
+                          placeholder="Enter 6-digit code"
+                          value={resetCode}
+                          onChange={(e) => {
+                            const value = e.target.value.replace(/\D/g, "").slice(0, 6);
+                            setResetCode(value);
+                          }}
+                          className="w-full pl-12 pr-4 py-3 bg-gray-50 border-2 border-gray-200 rounded-xl focus:outline-none focus:border-slate-900 focus:bg-white transition-all text-slate-900 text-center text-2xl font-mono tracking-widest"
+                          disabled={forgotPasswordLoading}
+                          maxLength={6}
+                          required
+                        />
+                      </div>
+
+                      <button
+                        type="submit"
+                        disabled={forgotPasswordLoading || resetCode.length !== 6}
+                        className={`w-full py-3 rounded-xl font-bold text-white transition-all ${
+                          forgotPasswordLoading || resetCode.length !== 6
+                            ? "bg-gray-400 cursor-not-allowed"
+                            : "bg-indigo-600 hover:bg-indigo-700"
+                        }`}
+                      >
+                        {forgotPasswordLoading ? (
+                          <span className="flex items-center justify-center gap-2">
+                            <i className="fas fa-spinner fa-spin"></i>
+                            Verifying...
+                          </span>
+                        ) : (
+                          <span className="flex items-center justify-center gap-2">
+                            <i className="fas fa-check mr-2"></i>
+                            Verify Code
+                          </span>
+                        )}
+                      </button>
+
+                      <button
+                        type="button"
+                        onClick={async () => {
+                          setForgotPasswordLoading(true);
+                          setAuthError("");
+                          setForgotPasswordSuccess("");
+
+                          try {
+                            const response = await fetch("/api/auth/forgot-password", {
+                              method: "POST",
+                              headers: { "Content-Type": "application/json" },
+                              body: JSON.stringify({
+                                email: authEmail,
+                                ownerUid: ownerUid,
+                              }),
+                            });
+
+                            const data = await response.json();
+
+                            if (response.ok && data.success) {
+                              setForgotPasswordSuccess("New code sent to your email!");
+                            } else {
+                              setAuthError(data.error || "Failed to resend code. Please try again.");
+                            }
+                          } catch (error: any) {
+                            setAuthError(error.message || "Failed to resend code. Please try again.");
+                          } finally {
+                            setForgotPasswordLoading(false);
+                          }
+                        }}
+                        disabled={forgotPasswordLoading}
+                        className="w-full py-2 text-sm text-slate-600 hover:text-slate-900 transition-colors"
+                      >
+                        <i className="fas fa-redo mr-1"></i>
+                        Resend Code
+                      </button>
+
+                      <button
+                        type="button"
+                        onClick={() => {
+                          setForgotPasswordMode("request");
+                          setResetCode("");
+                          setAuthError("");
+                          setForgotPasswordSuccess("");
+                        }}
+                        className="w-full py-2 text-sm text-slate-600 hover:text-slate-900 transition-colors"
+                      >
+                        <i className="fas fa-arrow-left mr-1"></i>
+                        Back
+                      </button>
+                    </form>
+                  </div>
+                )}
+
+                {/* Reset Password Step */}
+                {forgotPasswordMode === "reset" && (
+                  <div className="space-y-4">
+                    {/* Title */}
+                    <div className="text-center mb-6">
+                      <h2 className="text-3xl font-black text-slate-900 mb-2">Reset Password</h2>
+                      <p className="text-gray-600 text-sm">Create a new secure password</p>
+                    </div>
+
+                    {/* Error Message */}
+                    {authError && (
+                      <div className="mb-4 p-4 bg-red-50 border-l-4 border-red-500 rounded-lg animate-shake">
+                        <div className="flex items-center gap-2">
+                          <i className="fas fa-exclamation-circle text-red-600"></i>
+                          <p className="text-red-700 text-sm font-medium">{authError}</p>
+                        </div>
+                      </div>
+                    )}
+
+                    {/* Success Message */}
+                    {forgotPasswordSuccess && (
+                      <div className="mb-4 p-4 bg-green-50 border-l-4 border-green-500 rounded-lg">
+                        <div className="flex items-center gap-2">
+                          <i className="fas fa-check-circle text-green-600"></i>
+                          <p className="text-green-700 text-sm font-medium">{forgotPasswordSuccess}</p>
+                        </div>
+                      </div>
+                    )}
+
+                    <form
+                      onSubmit={async (e) => {
+                        e.preventDefault();
+                        if (newPassword.length < 8) {
+                          setAuthError("Password must be at least 8 characters long");
+                          return;
+                        }
+
+                        if (newPassword !== confirmPassword) {
+                          setAuthError("Passwords do not match");
+                          return;
+                        }
+
+                        // Validate password strength
+                        const passwordErrors: string[] = [];
+                        if (!/[A-Z]/.test(newPassword)) passwordErrors.push("one uppercase letter");
+                        if (!/[a-z]/.test(newPassword)) passwordErrors.push("one lowercase letter");
+                        if (!/[0-9]/.test(newPassword)) passwordErrors.push("one number");
+                        if (!/[!@#$%^&*()_+\-=\[\]{};':"\\|,.<>\/?]/.test(newPassword)) passwordErrors.push("one special character");
+
+                        if (passwordErrors.length > 0) {
+                          setAuthError(`Password must contain: ${passwordErrors.join(", ")}`);
+                          return;
+                        }
+
+                        setForgotPasswordLoading(true);
+                        setAuthError("");
+
+                        try {
+                          const response = await fetch("/api/auth/reset-password", {
+                            method: "POST",
+                            headers: { "Content-Type": "application/json" },
+                            body: JSON.stringify({
+                              email: authEmail,
+                              code: resetCode,
+                              newPassword: newPassword,
+                              ownerUid: ownerUid,
+                            }),
+                          });
+
+                          const data = await response.json();
+
+                          if (response.ok && data.success) {
+                            setForgotPasswordSuccess("Password reset successfully! You can now login with your new password.");
+                            setTimeout(() => {
+                              setForgotPasswordMode(null);
+                              setResetCode("");
+                              setNewPassword("");
+                              setConfirmPassword("");
+                              setForgotPasswordSuccess("");
+                              setAuthError("");
+                            }, 3000);
+                          } else {
+                            setAuthError(data.error || "Failed to reset password. Please try again.");
+                          }
+                        } catch (error: any) {
+                          setAuthError(error.message || "Failed to reset password. Please try again.");
+                        } finally {
+                          setForgotPasswordLoading(false);
+                        }
+                      }}
+                      className="space-y-4"
+                    >
+                      <div className="relative">
+                        <div className="absolute left-4 top-1/2 -translate-y-1/2 text-slate-600">
+                          <i className="fas fa-lock"></i>
+                        </div>
+                        <input
+                          type={showNewPassword ? "text" : "password"}
+                          placeholder="New Password"
+                          value={newPassword}
+                          onChange={(e) => setNewPassword(e.target.value)}
+                          className="w-full pl-12 pr-12 py-3 bg-gray-50 border-2 border-gray-200 rounded-xl focus:outline-none focus:border-slate-900 focus:bg-white transition-all text-slate-900"
+                          disabled={forgotPasswordLoading}
+                          required
+                        />
+                        <button
+                          type="button"
+                          onClick={() => setShowNewPassword(!showNewPassword)}
+                          className="absolute right-4 top-1/2 -translate-y-1/2 text-gray-500 hover:text-slate-900 transition-colors"
+                        >
+                          <i className={`fas ${showNewPassword ? "fa-eye-slash" : "fa-eye"}`}></i>
+                        </button>
+                      </div>
+
+                      <div className="relative">
+                        <div className="absolute left-4 top-1/2 -translate-y-1/2 text-slate-600">
+                          <i className="fas fa-lock"></i>
+                        </div>
+                        <input
+                          type={showConfirmPassword ? "text" : "password"}
+                          placeholder="Confirm New Password"
+                          value={confirmPassword}
+                          onChange={(e) => setConfirmPassword(e.target.value)}
+                          className="w-full pl-12 pr-12 py-3 bg-gray-50 border-2 border-gray-200 rounded-xl focus:outline-none focus:border-slate-900 focus:bg-white transition-all text-slate-900"
+                          disabled={forgotPasswordLoading}
+                          required
+                        />
+                        <button
+                          type="button"
+                          onClick={() => setShowConfirmPassword(!showConfirmPassword)}
+                          className="absolute right-4 top-1/2 -translate-y-1/2 text-gray-500 hover:text-slate-900 transition-colors"
+                        >
+                          <i className={`fas ${showConfirmPassword ? "fa-eye-slash" : "fa-eye"}`}></i>
+                        </button>
+                      </div>
+
+                      <p className="text-xs text-gray-500">
+                        Password must be at least 8 characters and contain: uppercase, lowercase, number, and special character
+                      </p>
+
+                      <button
+                        type="submit"
+                        disabled={forgotPasswordLoading || !newPassword || !confirmPassword}
+                        className={`w-full py-3 rounded-xl font-bold text-white transition-all ${
+                          forgotPasswordLoading || !newPassword || !confirmPassword
+                            ? "bg-gray-400 cursor-not-allowed"
+                            : "bg-green-600 hover:bg-green-700"
+                        }`}
+                      >
+                        {forgotPasswordLoading ? (
+                          <span className="flex items-center justify-center gap-2">
+                            <i className="fas fa-spinner fa-spin"></i>
+                            Resetting...
+                          </span>
+                        ) : (
+                          <span className="flex items-center justify-center gap-2">
+                            <i className="fas fa-check mr-2"></i>
+                            Reset Password
+                          </span>
+                        )}
+                      </button>
+
+                      <button
+                        type="button"
+                        onClick={() => {
+                          setForgotPasswordMode("verify");
+                          setNewPassword("");
+                          setConfirmPassword("");
+                          setAuthError("");
+                        }}
+                        className="w-full py-2 text-sm text-slate-600 hover:text-slate-900 transition-colors"
+                      >
+                        <i className="fas fa-arrow-left mr-1"></i>
+                        Back
+                      </button>
+                    </form>
+                  </div>
+                )}
+              </div>
+            ) : (
+              /* Regular Login/Register Form */
+              <>
+                {/* Title */}
+                <div className="text-center mb-6">
+                  <h2 className="text-3xl font-black text-slate-900 mb-2">
+                    {authMode === "login" ? "Welcome Back!" : "Join Us Today!"}
+                  </h2>
+                  <p className="text-gray-600 text-sm">
+                    {authMode === "login" 
+                      ? "Sign in to book your appointment" 
+                      : "Create your account to get started"}
+                  </p>
                 </div>
+
+                {/* Error Message */}
+                {authError && (
+                  <div className="mb-4 p-4 bg-red-50 border-l-4 border-red-500 rounded-lg animate-shake">
+                    <div className="flex items-center gap-2">
+                      <i className="fas fa-exclamation-circle text-red-600"></i>
+                      <p className="text-red-700 text-sm font-medium">{authError}</p>
+                    </div>
+                  </div>
+                )}
+
+                {/* Form */}
+                <form 
+                  onSubmit={(e) => {
+                    e.preventDefault();
+                    if (authMode === "login") {
+                      handleLogin();
+                    } else {
+                      handleRegister();
+                    }
+                  }}
+                  className="space-y-4"
+                >
+                  {authMode === "register" && (
+                    <>
+                        <div className="relative">
+                    <div className="absolute left-4 top-1/2 -translate-y-1/2 text-slate-600">
+                      <i className="fas fa-user"></i>
+                    </div>
+                          <input
+                            type="text"
+                            placeholder="Full Name"
+                            value={authFullName}
+                            onChange={(e) => setAuthFullName(e.target.value)}
+                            className="w-full pl-12 pr-4 py-3 bg-gray-50 border-2 border-gray-200 rounded-xl focus:outline-none focus:border-slate-900 focus:bg-white transition-all text-slate-900"
+                            disabled={authLoading}
+                          />
+                        </div>
+                        <div className="relative">
+                    <div className="absolute left-4 top-1/2 -translate-y-1/2 text-slate-600">
+                      <i className="fas fa-phone"></i>
+                    </div>
+                          <input
+                            type="tel"
+                            placeholder="Phone Number"
+                            value={authPhone}
+                            onChange={(e) => setAuthPhone(e.target.value)}
+                            className="w-full pl-12 pr-4 py-3 bg-gray-50 border-2 border-gray-200 rounded-xl focus:outline-none focus:border-slate-900 focus:bg-white transition-all text-slate-900"
+                            disabled={authLoading}
+                          />
+                      </div>
+                    </>
+                  )}
+
+                    <div className="relative">
+                    <div className="absolute left-4 top-1/2 -translate-y-1/2 text-slate-600">
+                      <i className="fas fa-envelope"></i>
+                    </div>
                       <input
-                        type="tel"
-                        placeholder="Phone Number"
-                        value={authPhone}
-                        onChange={(e) => setAuthPhone(e.target.value)}
+                        type="email"
+                        placeholder="Email Address"
+                        value={authEmail}
+                        onChange={(e) => setAuthEmail(e.target.value)}
                         className="w-full pl-12 pr-4 py-3 bg-gray-50 border-2 border-gray-200 rounded-xl focus:outline-none focus:border-slate-900 focus:bg-white transition-all text-slate-900"
                         disabled={authLoading}
+                        required
                       />
                   </div>
-                </>
-              )}
 
-                <div className="relative">
-                <div className="absolute left-4 top-1/2 -translate-y-1/2 text-slate-600">
-                  <i className="fas fa-envelope"></i>
-                </div>
-                  <input
-                    type="email"
-                    placeholder="Email Address"
-                    value={authEmail}
-                    onChange={(e) => setAuthEmail(e.target.value)}
-                    className="w-full pl-12 pr-4 py-3 bg-gray-50 border-2 border-gray-200 rounded-xl focus:outline-none focus:border-slate-900 focus:bg-white transition-all text-slate-900"
-                    disabled={authLoading}
-                    required
-                  />
-              </div>
+                    <div className="relative">
+                    <div className="absolute left-4 top-1/2 -translate-y-1/2 text-slate-600">
+                      <i className="fas fa-lock"></i>
+                    </div>
+                      <input
+                        type={showPassword ? "text" : "password"}
+                        placeholder="Password"
+                        value={authPassword}
+                        onChange={(e) => setAuthPassword(e.target.value)}
+                        className="w-full pl-12 pr-12 py-3 bg-gray-50 border-2 border-gray-200 rounded-xl focus:outline-none focus:border-slate-900 focus:bg-white transition-all text-slate-900"
+                        disabled={authLoading}
+                        required
+                      />
+                      <button
+                        type="button"
+                        onClick={() => setShowPassword(!showPassword)}
+                      className="absolute right-4 top-1/2 -translate-y-1/2 text-gray-500 hover:text-slate-900 transition-colors z-10"
+                        tabIndex={-1}
+                        aria-label={showPassword ? "Hide password" : "Show password"}
+                      >
+                      <i className={`fas ${showPassword ? "fa-eye-slash" : "fa-eye"} text-lg`}></i>
+                      </button>
+                    </div>
 
-                <div className="relative">
-                <div className="absolute left-4 top-1/2 -translate-y-1/2 text-slate-600">
-                  <i className="fas fa-lock"></i>
-                </div>
-                  <input
-                    type={showPassword ? "text" : "password"}
-                    placeholder="Password"
-                    value={authPassword}
-                    onChange={(e) => setAuthPassword(e.target.value)}
-                    className="w-full pl-12 pr-12 py-3 bg-gray-50 border-2 border-gray-200 rounded-xl focus:outline-none focus:border-slate-900 focus:bg-white transition-all text-slate-900"
-                    disabled={authLoading}
-                    required
-                  />
+                  {authMode === "register" && (
+                  <p className="text-xs text-gray-500 flex items-center gap-2">
+                    <i className="fas fa-info-circle text-slate-600"></i>
+                    Password must be at least 6 characters
+                    </p>
+                  )}
+
                   <button
-                    type="button"
-                    onClick={() => setShowPassword(!showPassword)}
-                  className="absolute right-4 top-1/2 -translate-y-1/2 text-gray-500 hover:text-slate-900 transition-colors z-10"
-                    tabIndex={-1}
-                    aria-label={showPassword ? "Hide password" : "Show password"}
+                    type="submit"
+                    disabled={authLoading}
+                    className={`w-full py-4 rounded-xl font-bold text-white transition-all transform shadow-lg ${
+                      authLoading
+                        ? "bg-gray-400 cursor-not-allowed"
+                        : "bg-slate-900 hover:bg-slate-800 hover:scale-105 hover:shadow-2xl active:scale-95"
+                    }`}
                   >
-                  <i className={`fas ${showPassword ? "fa-eye-slash" : "fa-eye"} text-lg`}></i>
+                      {authLoading ? (
+                      <span className="flex items-center justify-center gap-2">
+                        <i className="fas fa-spinner fa-spin"></i>
+                        {authMode === "login" ? "Signing in..." : "Creating account..."}
+                      </span>
+                      ) : (
+                      <span className="flex items-center justify-center gap-2 uppercase tracking-wider">
+                        <i className={`fas ${authMode === "login" ? "fa-sign-in-alt" : "fa-user-plus"}`}></i>
+                        {authMode === "login" ? "Sign In" : "Create Account"}
+                    </span>
+                    )}
                   </button>
-                </div>
 
-                {authMode === "register" && (
-                <p className="text-xs text-gray-500 flex items-center gap-2">
-                  <i className="fas fa-info-circle text-slate-600"></i>
-                  Password must be at least 6 characters
-                  </p>
-                )}
-
-              <button
-                type="submit"
-                disabled={authLoading}
-                className={`w-full py-4 rounded-xl font-bold text-white transition-all transform shadow-lg ${
-                  authLoading
-                    ? "bg-gray-400 cursor-not-allowed"
-                    : "bg-slate-900 hover:bg-slate-800 hover:scale-105 hover:shadow-2xl active:scale-95"
-                }`}
-              >
-                  {authLoading ? (
-                  <span className="flex items-center justify-center gap-2">
-                    <i className="fas fa-spinner fa-spin"></i>
-                      {authMode === "login" ? "Signing in..." : "Creating account..."}
-                  </span>
-                  ) : (
-                  <span className="flex items-center justify-center gap-2 uppercase tracking-wider">
-                    <i className={`fas ${authMode === "login" ? "fa-sign-in-alt" : "fa-user-plus"}`}></i>
-                    {authMode === "login" ? "Sign In" : "Create Account"}
-                </span>
-                )}
-              </button>
-            </form>
+                  {/* Forgot Password Link - Only show in login mode */}
+                  {authMode === "login" && (
+                    <div className="text-center mt-4">
+                      <button
+                        type="button"
+                        onClick={() => {
+                          setForgotPasswordMode("request");
+                          setForgotPasswordSuccess("");
+                          setAuthError("");
+                        }}
+                        className="text-sm text-slate-600 hover:text-slate-900 font-medium transition-colors"
+                      >
+                        <i className="fas fa-key mr-1"></i>
+                        Forgot Password?
+                      </button>
+                    </div>
+                  )}
+                </form>
+              </>
+            )}
           </div>
         </div>
 

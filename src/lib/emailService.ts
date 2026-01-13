@@ -4,11 +4,40 @@ import { FieldValue } from "firebase-admin/firestore";
 import type { BookingStatus } from "./bookingTypes";
 
 // Initialize SendGrid
-const SENDGRID_API_KEY = process.env.SENDGRID_API_KEY;
-const FROM_EMAIL = process.env.FROM_EMAIL || "booking@bmspros.com.au";
+let SENDGRID_API_KEY = process.env.SENDGRID_API_KEY;
+const FROM_EMAIL = process.env.FROM_EMAIL || "noreply@bmspros.com.au";
 
-if (SENDGRID_API_KEY) {
-  sgMail.setApiKey(SENDGRID_API_KEY);
+/**
+ * Ensure SendGrid is initialized with API key
+ * This function checks and initializes SendGrid at runtime
+ */
+function ensureSendGridInitialized(): boolean {
+  // Re-check environment variable in case it was set after module load
+  if (!SENDGRID_API_KEY || SENDGRID_API_KEY.trim() === "") {
+    SENDGRID_API_KEY = process.env.SENDGRID_API_KEY;
+  }
+  
+  if (SENDGRID_API_KEY && SENDGRID_API_KEY.trim()) {
+    try {
+      sgMail.setApiKey(SENDGRID_API_KEY.trim());
+      return true;
+    } catch (error) {
+      console.error("[EMAIL] Failed to set SendGrid API key:", error);
+      return false;
+    }
+  }
+  
+  return false;
+}
+
+// Initialize SendGrid API key if available at module load
+if (SENDGRID_API_KEY && SENDGRID_API_KEY.trim()) {
+  sgMail.setApiKey(SENDGRID_API_KEY.trim());
+  console.log("[EMAIL] ✅ SendGrid initialized successfully");
+} else {
+  console.warn("[EMAIL] ⚠️  SendGrid API key not found in environment variables");
+  console.warn("[EMAIL] Please set SENDGRID_API_KEY in your .env.local file");
+  console.warn("[EMAIL] Example: SENDGRID_API_KEY=SG.your-api-key-here");
 }
 
 /**
@@ -415,10 +444,11 @@ export async function sendBookingEmail(data: BookingEmailData): Promise<{ succes
     return { success: false, error: "Email already sent for this status" };
   }
   
-  // Verify SendGrid is configured
-  if (!SENDGRID_API_KEY || SENDGRID_API_KEY === "") {
+  // Ensure SendGrid is initialized
+  if (!ensureSendGridInitialized()) {
     console.error(`[EMAIL] SendGrid API key not configured!`);
-    return { success: false, error: "SendGrid API key not configured" };
+    console.error(`[EMAIL] Please set SENDGRID_API_KEY in your .env.local file`);
+    return { success: false, error: "SendGrid API key not configured. Please contact support." };
   }
   
   try {
@@ -584,5 +614,326 @@ export async function sendBookingStatusChangeEmail(
   
   if (!result.success) {
     console.error(`[EMAIL] Failed to send booking status change email:`, result.error);
+  }
+}
+
+/**
+ * Generate HTML for password reset email with 6-digit code
+ */
+function generatePasswordResetEmailHTML(
+  userName: string,
+  resetCode: string
+): string {
+  return `
+<!DOCTYPE html>
+<html>
+<head>
+  <meta charset="utf-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1.0">
+  <title>Reset Your Password - BMS PRO PINK</title>
+</head>
+<body style="margin: 0; padding: 0; font-family: -apple-system, BlinkMacSystemFont, 'Segoe UI', Roboto, 'Helvetica Neue', Arial, sans-serif; background-color: #f3f4f6;">
+  <table role="presentation" style="width: 100%; border-collapse: collapse; background-color: #f3f4f6;">
+    <tr>
+      <td style="padding: 40px 20px;">
+        <table role="presentation" style="max-width: 600px; margin: 0 auto; background-color: #ffffff; border-radius: 12px; box-shadow: 0 4px 6px rgba(0,0,0,0.1); overflow: hidden;">
+          
+          <!-- Header -->
+          <tr>
+            <td style="padding: 0; background: linear-gradient(135deg, #ec4899 0%, #8b5cf6 100%);">
+              <div style="padding: 40px; text-align: center;">
+                <div style="font-size: 56px; margin-bottom: 15px; line-height: 1;">🔐</div>
+                <h1 style="margin: 0; color: #ffffff; font-size: 28px; font-weight: 700; letter-spacing: -0.3px;">Reset Your Password</h1>
+                <p style="margin: 15px 0 0; color: rgba(255,255,255,0.9); font-size: 16px;">BMS PRO PINK</p>
+              </div>
+            </td>
+          </tr>
+          
+          <!-- Greeting -->
+          <tr>
+            <td style="padding: 30px 40px 20px;">
+              <p style="margin: 0 0 15px; color: #374151; font-size: 16px; line-height: 1.6;">Hello ${userName},</p>
+              <p style="margin: 0 0 25px; color: #374151; font-size: 16px; line-height: 1.6;">
+                We received a request to reset your password for your BMS PRO PINK account. Use the 6-digit code below to verify your identity and reset your password.
+              </p>
+            </td>
+          </tr>
+          
+          <!-- Verification Code -->
+          <tr>
+            <td style="padding: 0 40px 30px; text-align: center;">
+              <div style="background: linear-gradient(135deg, #fef3c7 0%, #fef9e7 100%); border: 2px solid #f59e0b; border-radius: 16px; padding: 30px; margin-bottom: 20px;">
+                <p style="margin: 0 0 15px; color: #78350f; font-size: 14px; font-weight: 600; text-transform: uppercase; letter-spacing: 1px;">Your Verification Code</p>
+                <div style="font-size: 48px; font-weight: 700; letter-spacing: 8px; color: #92400e; font-family: monospace; margin: 15px 0;">
+                  ${resetCode}
+                </div>
+                <p style="margin: 15px 0 0; color: #92400e; font-size: 13px;">Enter this code on the password reset page</p>
+              </div>
+            </td>
+          </tr>
+          
+          <!-- Warning -->
+          <tr>
+            <td style="padding: 0 40px 30px;">
+              <div style="background-color: #fff7ed; border-left: 3px solid #f59e0b; padding: 12px 16px; border-radius: 6px;">
+                <p style='margin: 0; color: #92400e; font-size: 13px; line-height: 1.6;'>
+                  <strong style='color: #78350f;'>⚠️ Important:</strong> This code will expire in 15 minutes. If you didn't request a password reset, please ignore this email or contact support if you have concerns.
+                </p>
+              </div>
+            </td>
+          </tr>
+          
+          <!-- Instructions -->
+          <tr>
+            <td style="padding: 0 40px 30px;">
+              <div style="background-color: #eef2ff; border-radius: 8px; padding: 20px;">
+                <p style="margin: 0 0 12px; color: #312e81; font-size: 14px; font-weight: 600;">How to reset your password:</p>
+                <ol style="margin: 0; padding-left: 20px; color: #374151; font-size: 14px; line-height: 1.8;">
+                  <li style="margin-bottom: 8px;">Go to the password reset page</li>
+                  <li style="margin-bottom: 8px;">Enter your email address and the 6-digit code</li>
+                  <li style="margin-bottom: 8px;">Create a new secure password</li>
+                  <li>Sign in with your new password</li>
+                </ol>
+              </div>
+            </td>
+          </tr>
+          
+          <!-- Footer -->
+          <tr>
+            <td style="padding: 25px 40px; background-color: #f9fafb; border-top: 1px solid #e5e7eb; text-align: center;">
+              <p style="margin: 0 0 8px; color: #111827; font-size: 14px; font-weight: 600;">BMS PRO PINK</p>
+              <p style="margin: 0; color: #6b7280; font-size: 12px; line-height: 1.5;">
+                This is an automated email from BMS PRO PINK.<br>
+                Please do not reply to this message.
+              </p>
+            </td>
+          </tr>
+          
+        </table>
+      </td>
+    </tr>
+  </table>
+</body>
+</html>
+  `.trim();
+}
+
+/**
+ * Send password reset email to user with 6-digit code
+ */
+export async function sendPasswordResetEmail(
+  email: string,
+  userName: string,
+  resetCode: string
+): Promise<{ success: boolean; error?: string }> {
+  console.log(`[EMAIL] Attempting to send password reset email to: ${email}`);
+  
+  // Validate email
+  if (!email || !email.trim()) {
+    console.error(`[EMAIL] No email provided`);
+    return { success: false, error: "No email provided" };
+  }
+  
+  const emailAddress = email.trim().toLowerCase();
+  const emailRegex = /^[^\s@]+@[^\s@]+\.[^\s@]+$/;
+  if (!emailRegex.test(emailAddress)) {
+    console.error(`[EMAIL] Invalid email address: ${emailAddress}`);
+    return { success: false, error: "Invalid email address" };
+  }
+  
+  // Ensure SendGrid is initialized
+  if (!ensureSendGridInitialized()) {
+    console.error(`[EMAIL] SendGrid API key not configured!`);
+    console.error(`[EMAIL] Please set SENDGRID_API_KEY in your .env.local file`);
+    return { success: false, error: "SendGrid API key not configured. Please contact support." };
+  }
+  
+  try {
+    const html = generatePasswordResetEmailHTML(userName, resetCode);
+    const subject = `Reset Your Password - BMS PRO PINK`;
+    
+    const msg = {
+      to: emailAddress,
+      from: FROM_EMAIL,
+      subject: subject,
+      html: html,
+      trackingSettings: {
+        clickTracking: {
+          enable: false, // Disable click tracking so links go directly to destination
+        },
+      },
+    };
+    
+    console.log(`[EMAIL] Sending password reset email via SendGrid:`, {
+      to: emailAddress,
+      from: FROM_EMAIL,
+      subject: subject,
+    });
+    
+    await sgMail.send(msg);
+    
+    console.log(`[EMAIL] ✅ Password reset email sent successfully to ${emailAddress}`);
+    return { success: true };
+  } catch (error: any) {
+    console.error(`[EMAIL] ❌ Error sending password reset email to ${emailAddress}:`, error);
+    console.error(`[EMAIL] Error details:`, {
+      message: error?.message,
+      code: error?.code,
+      response: error?.response?.body,
+      statusCode: error?.response?.statusCode,
+    });
+    const errorMessage = error?.response?.body?.errors?.[0]?.message || error?.message || "Unknown error";
+    return { success: false, error: errorMessage };
+  }
+}
+
+/**
+ * Generate HTML for welcome email when customer registers
+ */
+function generateWelcomeEmailHTML(
+  userName: string,
+  salonName: string
+): string {
+  const bookingUrl = `${process.env.NEXT_PUBLIC_APP_URL || "https://pink.bmspros.com.au"}/book`;
+  
+  return `
+<!DOCTYPE html>
+<html>
+<head>
+  <meta charset="utf-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1.0">
+  <title>Welcome to ${salonName} - BMS PRO PINK</title>
+</head>
+<body style="margin: 0; padding: 0; font-family: -apple-system, BlinkMacSystemFont, 'Segoe UI', Roboto, 'Helvetica Neue', Arial, sans-serif; background-color: #f3f4f6;">
+  <table role="presentation" style="width: 100%; border-collapse: collapse; background-color: #f3f4f6;">
+    <tr>
+      <td style="padding: 40px 20px;">
+        <table role="presentation" style="max-width: 600px; margin: 0 auto; background-color: #ffffff; border-radius: 12px; box-shadow: 0 4px 6px rgba(0,0,0,0.1); overflow: hidden;">
+          
+          <!-- Header -->
+          <tr>
+            <td style="padding: 0; background: linear-gradient(135deg, #ec4899 0%, #8b5cf6 100%);">
+              <div style="padding: 40px; text-align: center;">
+                <div style="font-size: 56px; margin-bottom: 15px; line-height: 1;">🎉</div>
+                <h1 style="margin: 0; color: #ffffff; font-size: 28px; font-weight: 700; letter-spacing: -0.3px;">Welcome to ${salonName}!</h1>
+                <p style="margin: 15px 0 0; color: rgba(255,255,255,0.9); font-size: 16px;">BMS PRO PINK</p>
+              </div>
+            </td>
+          </tr>
+          
+          <!-- Greeting -->
+          <tr>
+            <td style="padding: 30px 40px 20px;">
+              <p style="margin: 0 0 15px; color: #374151; font-size: 16px; line-height: 1.6;">Hello ${userName},</p>
+              <p style="margin: 0 0 25px; color: #374151; font-size: 16px; line-height: 1.6;">
+                Thank you for creating an account with ${salonName}! We're thrilled to have you as part of our community.
+              </p>
+            </td>
+          </tr>
+          
+          <!-- Welcome Message -->
+          <tr>
+            <td style="padding: 0 40px 30px;">
+              <div style="background: linear-gradient(135deg, #fef3c7 0%, #fef9e7 100%); border: 2px solid #f59e0b; border-radius: 16px; padding: 30px; margin-bottom: 20px;">
+                <p style="margin: 0 0 15px; color: #78350f; font-size: 16px; font-weight: 600; text-align: center;">
+                  You're all set! 🎊
+                </p>
+                <p style="margin: 0; color: #92400e; font-size: 14px; line-height: 1.6; text-align: center;">
+                  Your account has been successfully created. You can now book appointments, manage your bookings, and enjoy all the services ${salonName} has to offer.
+                </p>
+              </div>
+            </td>
+          </tr>
+          
+          <!-- Footer -->
+          <tr>
+            <td style="padding: 25px 40px; background-color: #f9fafb; border-top: 1px solid #e5e7eb; text-align: center;">
+              <p style="margin: 0 0 8px; color: #111827; font-size: 14px; font-weight: 600;">${salonName}</p>
+              <p style="margin: 0; color: #6b7280; font-size: 12px; line-height: 1.5;">
+                This is an automated email from BMS PRO PINK.<br>
+                Please do not reply to this message.
+              </p>
+            </td>
+          </tr>
+          
+        </table>
+      </td>
+    </tr>
+  </table>
+</body>
+</html>
+  `.trim();
+}
+
+/**
+ * Send welcome email to customer when they register for a salon
+ */
+export async function sendWelcomeEmail(
+  email: string,
+  userName: string,
+  ownerUid: string
+): Promise<{ success: boolean; error?: string }> {
+  console.log(`[EMAIL] Attempting to send welcome email to: ${email}`);
+  
+  // Validate email
+  if (!email || !email.trim()) {
+    console.error(`[EMAIL] No email provided`);
+    return { success: false, error: "No email provided" };
+  }
+  
+  const emailAddress = email.trim().toLowerCase();
+  const emailRegex = /^[^\s@]+@[^\s@]+\.[^\s@]+$/;
+  if (!emailRegex.test(emailAddress)) {
+    console.error(`[EMAIL] Invalid email address: ${emailAddress}`);
+    return { success: false, error: "Invalid email address" };
+  }
+  
+  // Ensure SendGrid is initialized
+  if (!ensureSendGridInitialized()) {
+    console.error(`[EMAIL] SendGrid API key not configured!`);
+    console.error(`[EMAIL] Please set SENDGRID_API_KEY in your .env.local file`);
+    return { success: false, error: "SendGrid API key not configured. Please contact support." };
+  }
+  
+  try {
+    // Get salon name
+    const salonName = await getSalonName(ownerUid);
+    
+    const html = generateWelcomeEmailHTML(userName, salonName);
+    const subject = `Welcome to ${salonName}! - BMS PRO PINK`;
+    
+    const msg = {
+      to: emailAddress,
+      from: FROM_EMAIL,
+      subject: subject,
+      html: html,
+      trackingSettings: {
+        clickTracking: {
+          enable: false, // Disable click tracking so links go directly to destination
+        },
+      },
+    };
+    
+    console.log(`[EMAIL] Sending welcome email via SendGrid:`, {
+      to: emailAddress,
+      from: FROM_EMAIL,
+      subject: subject,
+      salonName: salonName,
+    });
+    
+    await sgMail.send(msg);
+    
+    console.log(`[EMAIL] ✅ Welcome email sent successfully to ${emailAddress}`);
+    return { success: true };
+  } catch (error: any) {
+    console.error(`[EMAIL] ❌ Error sending welcome email to ${emailAddress}:`, error);
+    console.error(`[EMAIL] Error details:`, {
+      message: error?.message,
+      code: error?.code,
+      response: error?.response?.body,
+      statusCode: error?.response?.statusCode,
+    });
+    const errorMessage = error?.response?.body?.errors?.[0]?.message || error?.message || "Unknown error";
+    return { success: false, error: errorMessage };
   }
 }
