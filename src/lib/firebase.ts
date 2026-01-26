@@ -2,15 +2,15 @@ import { initializeApp, getApps, getApp } from "firebase/app";
 import { getAuth } from "firebase/auth";
 import { initializeFirestore } from "firebase/firestore";
 
-// Firebase configuration (prefer env; fallback to hard-coded dev values)
+// Firebase configuration (prefer env; fallback to staging values)
 const firebaseConfig = {
-  apiKey: process.env.NEXT_PUBLIC_FIREBASE_API_KEY || "AIzaSyD08qXcZjC1N_wX8EE5YGgN4sA-ZrJQICg",
-  authDomain: process.env.NEXT_PUBLIC_FIREBASE_AUTH_DOMAIN || "bmspro-pink.firebaseapp.com",
-  projectId: process.env.NEXT_PUBLIC_FIREBASE_PROJECT_ID || "bmspro-pink",
-  storageBucket: process.env.NEXT_PUBLIC_FIREBASE_STORAGE_BUCKET || "bmspro-pink.firebasestorage.app",
-  messagingSenderId: process.env.NEXT_PUBLIC_FIREBASE_MESSAGING_SENDER_ID || "960634304944",
-  appId: process.env.NEXT_PUBLIC_FIREBASE_APP_ID || "1:960634304944:web:9c9cb29b14b13924b73e75",
-  measurementId: process.env.NEXT_PUBLIC_FIREBASE_MEASUREMENT_ID || "G-M4XJKLN1Y2",
+  apiKey: process.env.NEXT_PUBLIC_FIREBASE_API_KEY || "AIzaSyDEqqcY5778KkFGeeD59DdxaVJmyWl6Kpw",
+  authDomain: process.env.NEXT_PUBLIC_FIREBASE_AUTH_DOMAIN || "bmspro-pink-v2-staging.firebaseapp.com",
+  projectId: process.env.NEXT_PUBLIC_FIREBASE_PROJECT_ID || "bmspro-pink-v2-staging",
+  storageBucket: process.env.NEXT_PUBLIC_FIREBASE_STORAGE_BUCKET || "bmspro-pink-v2-staging.firebasestorage.app",
+  messagingSenderId: process.env.NEXT_PUBLIC_FIREBASE_MESSAGING_SENDER_ID || "545320934186",
+  appId: process.env.NEXT_PUBLIC_FIREBASE_APP_ID || "1:545320934186:web:ebf4aa8fb734539ec99c53",
+  measurementId: process.env.NEXT_PUBLIC_FIREBASE_MEASUREMENT_ID || "G-5TJLX869X9",
 };
 
 // Initialize (guarded for Next.js hot reload)
