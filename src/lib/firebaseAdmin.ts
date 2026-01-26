@@ -50,7 +50,7 @@ export function getAdminApp() {
       console.log("✓ Using individual Firebase credentials");
     } else {
       // Try to use default project ID from client config
-      const defaultProjectId = process.env.NEXT_PUBLIC_FIREBASE_PROJECT_ID || "bmspro-pink";
+      const defaultProjectId = process.env.NEXT_PUBLIC_FIREBASE_PROJECT_ID || "bmspro-pink-v2-staging";
       if (process.env.FIREBASE_CLIENT_EMAIL && process.env.FIREBASE_PRIVATE_KEY) {
         serviceAccount = {
           project_id: defaultProjectId,
@@ -79,11 +79,11 @@ export function getAdminApp() {
         console.error("\n=== Firebase Admin: Missing credentials ===");
         console.error("You need to provide Firebase Admin credentials.");
         console.error("\nOption 1 - Add individual credentials to .env:");
-        console.error("FIREBASE_PROJECT_ID=bmspro-pink");
-        console.error("FIREBASE_CLIENT_EMAIL=firebase-adminsdk-xxxxx@bmspro-pink.iam.gserviceaccount.com");
+        console.error("FIREBASE_PROJECT_ID=bmspro-pink-v2-staging");
+        console.error("FIREBASE_CLIENT_EMAIL=firebase-adminsdk-xxxxx@bmspro-pink-v2-staging.iam.gserviceaccount.com");
         console.error("FIREBASE_PRIVATE_KEY=\"-----BEGIN PRIVATE KEY-----\\n...\"");
         console.error("\nOption 2 - Use full service account JSON:");
-        console.error("FIREBASE_SERVICE_ACCOUNT='{\"type\":\"service_account\",\"project_id\":\"bmspro-pink\",\"client_email\":\"...\",\"private_key\":\"...\",...}'");
+        console.error("FIREBASE_SERVICE_ACCOUNT='{\"type\":\"service_account\",\"project_id\":\"bmspro-pink-v2-staging\",\"client_email\":\"...\",\"private_key\":\"...\",...}'");
         console.error("\nTo get your service account credentials:");
         console.error("1. Go to Firebase Console → Project Settings → Service Accounts");
         console.error("2. Click 'Generate New Private Key' to download JSON file");
