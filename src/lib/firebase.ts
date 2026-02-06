@@ -2,7 +2,7 @@ import { initializeApp, getApps, getApp } from "firebase/app";
 import { getAuth } from "firebase/auth";
 import { initializeFirestore } from "firebase/firestore";
 
-// Firebase configuration (prefer env; fallback to staging values)
+// Firebase configuration (prefer env; fallback to production values)
 const firebaseConfig = {
   apiKey: process.env.NEXT_PUBLIC_FIREBASE_API_KEY || "AIzaSyDEqqcY5778KkFGeeD59DdxaVJmyWl6Kpw",
   authDomain: process.env.NEXT_PUBLIC_FIREBASE_AUTH_DOMAIN || "bmspro-pink-v2-staging.firebaseapp.com",

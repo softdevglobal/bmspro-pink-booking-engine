@@ -165,16 +165,30 @@ async function sendPushNotification(
       data: data || {},
       android: {
         priority: "high",
+        ttl: 86400000, // 24 hours in milliseconds
         notification: {
           sound: "default",
           channelId: "appointments",
+          priority: "high",
+          defaultSound: true,
+          defaultVibrateTimings: true,
         },
       },
       apns: {
+        headers: {
+          "apns-priority": "10", // High priority for immediate delivery
+          "apns-push-type": "alert",
+        },
         payload: {
           aps: {
+            alert: {
+              title,
+              body,
+            },
             sound: "default",
             badge: 1,
+            "content-available": 1, // Wake up app in background
+            "mutable-content": 1,   // Allow notification modification
           },
         },
       },

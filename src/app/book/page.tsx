@@ -11,11 +11,16 @@ import { doc, updateDoc, serverTimestamp } from "firebase/firestore";
 import NotificationPanel from "@/components/NotificationPanel";
 import { getCurrentDateTimeInTimezone } from "@/lib/timezone";
 
-function BookPageContent() {
+interface BookPageContentProps {
+  /** When provided (e.g., from [slug] route), skips searchParams lookup */
+  resolvedOwnerUid?: string;
+}
+
+function BookPageContent({ resolvedOwnerUid }: BookPageContentProps = {}) {
   const searchParams = useSearchParams();
   const router = useRouter();
   const DEFAULT_OWNER_UID = process.env.NEXT_PUBLIC_DEFAULT_OWNER_UID || "";
-  const ownerUid = searchParams.get("ownerUid") || DEFAULT_OWNER_UID;
+  const ownerUid = resolvedOwnerUid || searchParams.get("ownerUid") || DEFAULT_OWNER_UID;
 
   // Authentication state
   const [isAuthenticated, setIsAuthenticated] = useState<boolean>(false);
@@ -3224,3 +3229,5 @@ export default function BookPage() {
   );
 }
 
+// Named export for use by [slug] dynamic route
+export { BookPageContent };
