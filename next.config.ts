@@ -2,6 +2,10 @@ import type { NextConfig } from "next";
 
 const nextConfig: NextConfig = {
   /* config options here */
+  // basePath: Serve all booking engine routes under /book-now/
+  // This ensures assets (/_next/static/...) are also under /book-now/ 
+  // so the admin panel rewrite can proxy everything correctly
+  basePath: "/book-now",
   reactCompiler: true,
   serverExternalPackages: ["firebase-admin"],
   // Security: Limit RSC payload size to prevent DoS attacks (CVE-2025-55184)
