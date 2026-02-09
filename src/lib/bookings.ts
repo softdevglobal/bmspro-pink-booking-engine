@@ -3,6 +3,7 @@ import { addDoc, collection, serverTimestamp, query, where, onSnapshot, Document
 import type { BookingStatus } from "./bookingTypes";
 import { localToUTC } from "@/lib/timezone";
 import { apiUrl } from "@/lib/apiUrl";
+import { getOrCreateSessionId } from "@/lib/slotHolds";
 
 /**
  * Generate a readable booking code
@@ -61,6 +62,9 @@ export async function createBooking(input: BookingInput): Promise<{ id: string; 
   }
   
   try {
+    // Get session ID so the server can release the associated slot hold
+    const sessionId = typeof window !== "undefined" ? getOrCreateSessionId() : undefined;
+
     // Try API route first (uses Firebase Admin SDK, bypasses security rules)
     const res = await fetch(apiUrl("/api/booking-requests"), {
       method: "POST",
@@ -88,6 +92,7 @@ export async function createBooking(input: BookingInput): Promise<{ id: string; 
         price: input.price,
         customerUid: input.customerUid || undefined,
         services: input.services || undefined,
+        sessionId: sessionId || undefined, // For slot hold release
       }),
     });
 
@@ -99,9 +104,18 @@ export async function createBooking(input: BookingInput): Promise<{ id: string; 
       throw error;
     }
     return { id: json.id, bookingCode: json.bookingCode };
-  } catch (error) {
+  } catch (error: any) {
     console.error("Error creating booking via API:", error);
-    // Fallback: try direct client write (will fail if security rules don't allow)
+    
+    // If the error is a conflict (409) or other business-logic rejection,
+    // do NOT fall back to a direct Firestore write — that would bypass
+    // the atomic slot-lock and allow double-bookings.
+    if (error.status === 409 || error.status === 429 || error.status === 400) {
+      throw error; // Re-throw so the caller can show the appropriate message
+    }
+
+    // Fallback: try direct client write only for network/server errors
+    // (will fail if security rules don't allow)
     const payload = {
       ownerUid: input.ownerUid,
       client: input.client,

@@ -11,6 +11,15 @@ import { doc, updateDoc, serverTimestamp } from "firebase/firestore";
 import NotificationPanel from "@/components/NotificationPanel";
 import { getCurrentDateTimeInTimezone } from "@/lib/timezone";
 import { apiUrl } from "@/lib/apiUrl";
+import {
+  createSlotHold,
+  releaseAllHolds,
+  subscribeSlotHolds,
+  isSlotHeldByOther,
+  getOrCreateSessionId,
+  HOLD_DURATION_SECONDS,
+  type SlotHoldResult,
+} from "@/lib/slotHolds";
 
 interface BookPageContentProps {
   /** When provided (e.g., from [slug] route), skips searchParams lookup */
@@ -137,6 +146,14 @@ function BookPageContent({ resolvedOwnerUid }: BookPageContentProps = {}) {
   
   // Branch timezone time - refreshes every minute to keep time slots accurate
   const [branchCurrentTime, setBranchCurrentTime] = useState<{ date: string; time: string }>({ date: '', time: '' });
+
+  // --- Slot Hold (cinema-seat style locking) ---
+  const [activeHold, setActiveHold] = useState<SlotHoldResult | null>(null);
+  const [holdCountdown, setHoldCountdown] = useState<number>(0); // seconds remaining
+  const [slotHolds, setSlotHolds] = useState<Array<any>>([]); // real-time holds from other customers
+  const [holdError, setHoldError] = useState<string>(""); // errors from hold creation
+  const [holdLoading, setHoldLoading] = useState<boolean>(false); // loading state while creating hold
+  const sessionId = typeof window !== "undefined" ? getOrCreateSessionId() : "server";
 
   // Terms and conditions
   const [agreedToTerms, setAgreedToTerms] = useState<boolean>(false);
@@ -348,6 +365,48 @@ function BookPageContent({ resolvedOwnerUid }: BookPageContentProps = {}) {
     return () => unsub();
   }, [ownerUid, bkDate]);
 
+  // Subscribe to real-time slot holds for the selected date
+  useEffect(() => {
+    if (!ownerUid || !bkDate) return;
+    const dateStr = formatLocalYmd(bkDate);
+    const unsub = subscribeSlotHolds(ownerUid, dateStr, (holds) => {
+      setSlotHolds(holds);
+    });
+    return () => unsub();
+  }, [ownerUid, bkDate]);
+
+  // Hold countdown timer - ticks every second while a hold is active (internal tracking only)
+  useEffect(() => {
+    if (!activeHold) {
+      setHoldCountdown(0);
+      return;
+    }
+    const tick = () => {
+      const remaining = Math.max(0, Math.floor((activeHold.expiresAt - Date.now()) / 1000));
+      setHoldCountdown(remaining);
+    };
+    tick();
+    const interval = setInterval(tick, 1000);
+    return () => clearInterval(interval);
+  }, [activeHold]);
+
+  // Release holds when the page unloads (closing tab / navigating away)
+  useEffect(() => {
+    const handleBeforeUnload = () => {
+      // Best-effort release of holds on page close.
+      // sendBeacon doesn't support DELETE method, so we rely on the hold's
+      // built-in expiry as the primary mechanism for page-close cleanup.
+      // The releaseAllHolds() call may or may not complete before unload.
+      releaseAllHolds();
+    };
+    window.addEventListener("beforeunload", handleBeforeUnload);
+    return () => {
+      window.removeEventListener("beforeunload", handleBeforeUnload);
+      // Release holds on component unmount too
+      releaseAllHolds();
+    };
+  }, []);
+
   // Update branch current time every minute for accurate slot availability
   useEffect(() => {
     if (!bkBranchId) return;
@@ -488,10 +547,44 @@ function BookPageContent({ resolvedOwnerUid }: BookPageContentProps = {}) {
       setAuthEmail("");
       setAuthPassword("");
       
-      // If there was a pending step 3 navigation, move to step 3
+      // If there was a pending step 3 navigation, try to create hold first
       if (pendingStep3Navigation) {
         setPendingStep3Navigation(false);
-        setBkStep(3);
+        if (bkDate && bkBranchId && bkSelectedServices.length > 0) {
+          const holdServices = bkSelectedServices.map((serviceId) => {
+            const service = servicesList.find((s) => String(s.id) === String(serviceId));
+            return {
+              serviceId: String(serviceId),
+              staffId: bkServiceStaff[String(serviceId)] || null,
+              time: bkServiceTimes[String(serviceId)] || "",
+              duration: service?.duration || 60,
+            };
+          }).filter(s => s.time);
+          setHoldLoading(true);
+          try {
+            const hold = await createSlotHold(
+              ownerUid,
+              bkBranchId,
+              formatLocalYmd(bkDate),
+              holdServices,
+              auth.currentUser?.uid || null,
+            );
+            setActiveHold(hold);
+            setBkStep(3); // Only navigate if hold succeeded
+          } catch (holdErr: any) {
+            console.warn("Hold creation after auth failed:", holdErr);
+            if (holdErr.status === 409) {
+              setHoldError(holdErr.details || "This time slot is currently reserved by another customer. Please select a different time.");
+            } else {
+              setHoldError(holdErr.details || holdErr.message || "Could not reserve this slot. Please try again.");
+            }
+            // Stay on step 2 so user can pick a different time
+          } finally {
+            setHoldLoading(false);
+          }
+        } else {
+          setBkStep(3);
+        }
       }
       
       // If there was a pending booking confirmation, proceed with it
@@ -535,6 +628,11 @@ function BookPageContent({ resolvedOwnerUid }: BookPageContentProps = {}) {
       setCurrentCustomer(null);
       setShowAuthModal(true);
       setShowLogoutConfirm(false);
+      
+      // Release any active holds
+      releaseAllHolds();
+      setActiveHold(null);
+      setHoldError("");
       
       // Reset booking state
       setBkStep(1);
@@ -1021,8 +1119,19 @@ function BookPageContent({ resolvedOwnerUid }: BookPageContentProps = {}) {
       const occupiedResult = isSlotOccupied(slotStartMinutes);
       const blockedResult = isSlotBlockedByCurrentSelection(slotStartMinutes);
       
+      // Check if slot is held by another customer (cinema-seat locking)
+      const isHeld = isSlotHeldByOther(
+        slotHolds,
+        staffIdForService || null,
+        timeStr,
+        serviceDuration,
+        sessionId,
+      );
+      
       if (occupiedResult.occupied) {
         slots.push({ time: timeStr, available: false, reason: occupiedResult.reason || 'booked' });
+      } else if (isHeld) {
+        slots.push({ time: timeStr, available: false, reason: 'held' });
       } else if (blockedResult.blocked) {
         slots.push({ time: timeStr, available: false, reason: blockedResult.reason || 'selected' });
       } else {
@@ -1192,6 +1301,12 @@ function BookPageContent({ resolvedOwnerUid }: BookPageContentProps = {}) {
       });
       
       await incrementCustomerBookings(ownerUid, currentCustomer.uid);
+      
+      // Release the hold - booking has been created successfully
+      if (activeHold) {
+        releaseAllHolds();
+        setActiveHold(null);
+      }
       
       setBookingCode(result.bookingCode || "");
       setShowSuccess(true);
@@ -2741,6 +2856,8 @@ function BookPageContent({ resolvedOwnerUid }: BookPageContentProps = {}) {
                                     const isSelected = selectedTime === slot.time;
                                     const isDisabled = !slot.available;
                                     const isBookedByOther = slot.reason === 'booked';
+                                    const isHeldByOther = slot.reason === 'held';
+                                    const isAllStaffBooked = slot.reason === 'all_staff_booked';
                                     const isSelectedForOtherService = slot.reason === 'selected';
                                     const isInsufficientTime = slot.reason === 'insufficient_time' || slot.reason === 'insufficient_time_selected';
                                     const isClosesBeforeFinish = slot.reason === 'closes_before_finish';
@@ -2752,8 +2869,12 @@ function BookPageContent({ resolvedOwnerUid }: BookPageContentProps = {}) {
                                         tooltipMessage = (slot as any).message || 'Service would end after branch closing time';
                                       } else if (isInsufficientTime) {
                                         tooltipMessage = 'Not enough time - service would overlap with next booking';
+                                      } else if (isAllStaffBooked) {
+                                        tooltipMessage = 'All staff members are booked at this time';
                                       } else if (isBookedByOther) {
                                         tooltipMessage = 'Already booked by another customer';
+                                      } else if (isHeldByOther) {
+                                        tooltipMessage = 'Reserved by another customer';
                                       } else if (isSelectedForOtherService) {
                                         tooltipMessage = 'Selected for another service in this booking';
                                       }
@@ -2765,6 +2886,7 @@ function BookPageContent({ resolvedOwnerUid }: BookPageContentProps = {}) {
                                         onClick={() => {
                                           if (!isDisabled) {
                                             setBkServiceTimes({ ...bkServiceTimes, [String(serviceId)]: slot.time });
+                                            if (holdError) setHoldError("");
                                           }
                                         }}
                                         disabled={isDisabled}
@@ -2776,11 +2898,15 @@ function BookPageContent({ resolvedOwnerUid }: BookPageContentProps = {}) {
                                               ? "bg-orange-50 text-orange-400 border border-orange-200 cursor-not-allowed"
                                               : isInsufficientTime
                                                 ? "bg-yellow-50 text-yellow-600 border border-yellow-300 cursor-not-allowed"
-                                                : isBookedByOther
-                                                  ? "bg-red-50 text-red-400 border border-red-200 cursor-not-allowed line-through"
-                                                  : isSelectedForOtherService
-                                                    ? "bg-amber-50 text-amber-500 border border-amber-200 cursor-not-allowed"
-                                                    : "bg-white text-gray-700 border border-gray-200 hover:border-pink-300 hover:bg-pink-50"
+                                                : isAllStaffBooked
+                                                  ? "bg-gray-100 text-gray-400 border border-gray-200 cursor-not-allowed"
+                                                  : isBookedByOther
+                                                    ? "bg-red-50 text-red-400 border border-red-200 cursor-not-allowed line-through"
+                                                    : isHeldByOther
+                                                      ? "bg-amber-50 text-amber-400 border border-amber-300 cursor-not-allowed animate-pulse"
+                                                      : isSelectedForOtherService
+                                                      ? "bg-amber-50 text-amber-500 border border-amber-200 cursor-not-allowed"
+                                                      : "bg-white text-gray-700 border border-gray-200 hover:border-pink-300 hover:bg-pink-50"
                                         }`}
                                       >
                                         {slot.time}
@@ -2795,16 +2921,50 @@ function BookPageContent({ resolvedOwnerUid }: BookPageContentProps = {}) {
                                 )}
                               </div>
                               {/* Show legend for unavailable slot reasons */}
-                              {slots.some(s => s.reason === 'closes_before_finish' || s.reason === 'insufficient_time') && (
+                              {slots.some(s => s.reason === 'closes_before_finish' || s.reason === 'insufficient_time' || s.reason === 'held' || s.reason === 'all_staff_booked') && (
                                 <div className="mt-3 text-[10px] text-gray-500 flex flex-wrap gap-3 bg-gray-50 p-2 rounded-lg">
-                                  <span className="flex items-center gap-1">
-                                    <span className="w-2 h-2 rounded bg-orange-300"></span>
-                                    Branch closes before service ends
-                                  </span>
-                                  <span className="flex items-center gap-1">
-                                    <span className="w-2 h-2 rounded bg-yellow-300"></span>
-                                    Would overlap with next booking
-                                  </span>
+                                  {slots.some(s => s.reason === 'all_staff_booked') && (
+                                    <span className="flex items-center gap-1">
+                                      <span className="w-2 h-2 rounded bg-gray-400"></span>
+                                      All staff booked
+                                    </span>
+                                  )}
+                                  {slots.some(s => s.reason === 'closes_before_finish') && (
+                                    <span className="flex items-center gap-1">
+                                      <span className="w-2 h-2 rounded bg-orange-300"></span>
+                                      Branch closes before service ends
+                                    </span>
+                                  )}
+                                  {slots.some(s => s.reason === 'insufficient_time') && (
+                                    <span className="flex items-center gap-1">
+                                      <span className="w-2 h-2 rounded bg-yellow-300"></span>
+                                      Would overlap with next booking
+                                    </span>
+                                  )}
+                                  {slots.some(s => s.reason === 'held') && (
+                                    <span className="flex items-center gap-1">
+                                      <span className="w-2 h-2 rounded bg-amber-300 animate-pulse"></span>
+                                      Reserved by another customer
+                                    </span>
+                                  )}
+                                </div>
+                              )}
+                              {/* Hold conflict error - shown inside the time slot area */}
+                              {holdError && (
+                                <div className="mt-4 p-4 bg-red-50 border-2 border-red-300 rounded-xl flex items-start gap-3 shadow-sm animate-pulse-once">
+                                  <div className="flex-shrink-0 w-8 h-8 bg-red-100 rounded-full flex items-center justify-center">
+                                    <i className="fas fa-exclamation-triangle text-red-500 text-base"></i>
+                                  </div>
+                                  <div className="flex-1">
+                                    <p className="text-sm font-bold text-red-700 mb-0.5">Slot Unavailable</p>
+                                    <p className="text-sm text-red-600">{holdError}</p>
+                                  </div>
+                                  <button
+                                    onClick={() => setHoldError("")}
+                                    className="text-red-400 hover:text-red-600 flex-shrink-0 mt-0.5"
+                                  >
+                                    <i className="fas fa-times text-sm"></i>
+                                  </button>
                                 </div>
                               )}
                             </div>
@@ -2827,26 +2987,75 @@ function BookPageContent({ resolvedOwnerUid }: BookPageContentProps = {}) {
                   Back
                 </button>
                 <button
-                  onClick={() => {
+                  onClick={async () => {
                     // Check if user is authenticated before proceeding to confirmation
                     if (!isAuthenticated || !currentCustomer) {
-                      // Show auth modal and set pending step 3 navigation flag
                       setPendingStep3Navigation(true);
                       setShowAuthModal(true);
+                      return;
+                    }
+
+                    // Clear any previous hold error
+                    setHoldError("");
+
+                    // Create slot hold FIRST — block navigation until confirmed
+                    if (bkDate && bkBranchId && bkSelectedServices.length > 0) {
+                      const holdServices = bkSelectedServices.map((serviceId) => {
+                        const service = servicesList.find((s) => String(s.id) === String(serviceId));
+                        return {
+                          serviceId: String(serviceId),
+                          staffId: bkServiceStaff[String(serviceId)] || null,
+                          time: bkServiceTimes[String(serviceId)] || "",
+                          duration: service?.duration || 60,
+                        };
+                      }).filter(s => s.time);
+
+                      setHoldLoading(true);
+                      try {
+                        const hold = await createSlotHold(
+                          ownerUid,
+                          bkBranchId!,
+                          formatLocalYmd(bkDate),
+                          holdServices,
+                          currentCustomer?.uid || null,
+                        );
+                        setActiveHold(hold);
+                        // Hold acquired successfully — navigate to step 3
+                        setBkStep(3);
+                      } catch (err: any) {
+                        console.warn("Slot hold creation failed:", err);
+                        if (err.status === 409) {
+                          setHoldError(err.details || "This time slot is currently reserved by another customer. Please select a different time.");
+                        } else {
+                          setHoldError(err.details || err.message || "Could not reserve this slot. Please try again.");
+                        }
+                        // Do NOT navigate — stay on step 2 so user can pick a different time
+                      } finally {
+                        setHoldLoading(false);
+                      }
                     } else {
-                      // User is authenticated, proceed to step 3
+                      // Fallback: if no services/date selected, just navigate
                       setBkStep(3);
                     }
                   }}
-                  disabled={!bkDate || Object.keys(bkServiceTimes).length !== bkSelectedServices.length}
+                  disabled={holdLoading || !bkDate || Object.keys(bkServiceTimes).length !== bkSelectedServices.length}
                   className={`px-6 sm:px-8 py-3 rounded-lg font-semibold text-sm sm:text-base text-white transition-all ${
-                    bkDate && Object.keys(bkServiceTimes).length === bkSelectedServices.length
+                    !holdLoading && bkDate && Object.keys(bkServiceTimes).length === bkSelectedServices.length
                       ? "bg-gradient-to-r from-pink-600 to-purple-600 hover:shadow-lg"
                       : "bg-gray-300 cursor-not-allowed"
                   }`}
                 >
-                  Continue to Confirm
-                  <i className="fas fa-arrow-right ml-2"></i>
+                  {holdLoading ? (
+                    <>
+                      <i className="fas fa-spinner fa-spin mr-2"></i>
+                      Reserving...
+                    </>
+                  ) : (
+                    <>
+                      Continue to Confirm
+                      <i className="fas fa-arrow-right ml-2"></i>
+                    </>
+                  )}
                 </button>
               </div>
                         </div>
@@ -3071,7 +3280,13 @@ function BookPageContent({ resolvedOwnerUid }: BookPageContentProps = {}) {
               {/* Navigation Buttons */}
               <div className="flex justify-between items-center gap-3 pt-6 sm:pt-8 mt-6 sm:mt-8 border-t-2 border-gray-100">
                 <button
-                  onClick={() => setBkStep(2)}
+                  onClick={() => {
+                    // Release the hold when going back to time selection
+                    releaseAllHolds();
+                    setActiveHold(null);
+                    setHoldError("");
+                    setBkStep(2);
+                  }}
                   className="px-6 sm:px-8 py-3 border-2 border-gray-300 text-gray-700 font-semibold text-sm sm:text-base rounded-lg hover:bg-gray-50 transition-all"
                 >
                   <i className="fas fa-arrow-left mr-2"></i>
@@ -3190,6 +3405,9 @@ function BookPageContent({ resolvedOwnerUid }: BookPageContentProps = {}) {
             <button
               onClick={() => {
                 setShowSuccess(false);
+                releaseAllHolds();
+                setActiveHold(null);
+                setHoldError("");
                 setBkStep(1);
                 setBkBranchId(null);
                 setBkSelectedServices([]);
@@ -3264,6 +3482,9 @@ function BookPageContent({ resolvedOwnerUid }: BookPageContentProps = {}) {
                 <button
                 onClick={() => {
                   setShowSuccess(false);
+                  releaseAllHolds();
+                  setActiveHold(null);
+                  setHoldError("");
                   setBkStep(1);
                   setBkBranchId(null);
                   setBkSelectedServices([]);

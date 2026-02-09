@@ -468,6 +468,7 @@ type CreateBookingRequestInput = {
   status?: string;
   price: number;
   customerUid?: string; // Customer account UID (for authenticated bookings)
+  sessionId?: string; // Browser session ID for slot hold management
   services?: Array<{ 
     id: string | number; 
     name?: string; 
@@ -569,9 +570,12 @@ export async function POST(req: NextRequest) {
       return shouldBlockSlots(status);
     };
 
+    // Session ID from the booking request (used for slot hold identification)
+    const sessionId = body.sessionId || null;
+
     // Check for existing bookings that would conflict
     try {
-      // Query bookings for the same date
+      // Query bookings for the same date, and also query active slot holds
       const bookingsQuery = db.collection("bookings")
         .where("ownerUid", "==", String(body.ownerUid))
         .where("date", "==", dateStr);
@@ -580,9 +584,15 @@ export async function POST(req: NextRequest) {
         .where("ownerUid", "==", String(body.ownerUid))
         .where("date", "==", dateStr);
 
-      const [bookingsSnapshot, bookingRequestsSnapshot] = await Promise.all([
+      const slotHoldsQuery = db.collection("slotHolds")
+        .where("ownerUid", "==", String(body.ownerUid))
+        .where("date", "==", dateStr)
+        .where("status", "==", "active");
+
+      const [bookingsSnapshot, bookingRequestsSnapshot, slotHoldsSnapshot] = await Promise.all([
         bookingsQuery.get().catch(() => ({ docs: [] })),
-        bookingRequestsQuery.get().catch(() => ({ docs: [] }))
+        bookingRequestsQuery.get().catch(() => ({ docs: [] })),
+        slotHoldsQuery.get().catch(() => ({ docs: [] as any[] })),
       ]);
 
       // Combine results from both collections
@@ -844,6 +854,49 @@ export async function POST(req: NextRequest) {
           }
         }
       }
+      // --- Also check active slot holds from OTHER sessions ---
+      const now = Date.now();
+      const activeOtherHolds = (slotHoldsSnapshot.docs || [])
+        .map((d: any) => ({ id: d.id, ...d.data() }))
+        .filter((h: any) => h.sessionId !== sessionId && h.expiresAt > now);
+
+      for (const newService of servicesToCheck) {
+        const newServiceTime = newService.time || body.time;
+        const newServiceDuration = newService.duration || body.duration;
+        const newServiceStaffId = newService.staffId || body.staffId || null;
+
+        if (!newServiceTime) continue;
+
+        const newStartMinutes = timeToMinutes(newServiceTime);
+        const newEndMinutes = newStartMinutes + newServiceDuration;
+        const newHasStaff = isValidStaffAssignment(newServiceStaffId);
+
+        for (const hold of activeOtherHolds) {
+          if (!Array.isArray(hold.services)) continue;
+          for (const holdSvc of hold.services) {
+            if (!holdSvc.time) continue;
+            const holdStaffId = holdSvc.staffId || null;
+            const holdHasStaff = isValidStaffAssignment(holdStaffId);
+
+            // Only conflict if same staff (or either is "any staff")
+            if (newHasStaff && holdHasStaff && newServiceStaffId !== holdStaffId) continue;
+
+            const holdStart = timeToMinutes(holdSvc.time);
+            const holdEnd = holdStart + (holdSvc.duration || 60);
+
+            if (timeRangesOverlap(newStartMinutes, newEndMinutes, holdStart, holdEnd)) {
+              console.log(`[BOOKING CONFLICT] Slot held by another customer (hold: ${hold.id}, session: ${hold.sessionId})`);
+              return NextResponse.json(
+                {
+                  error: "Time slot is temporarily reserved",
+                  details: `${newServiceTime} is being held by another customer. Please wait or choose a different time.`,
+                },
+                { status: 409 }
+              );
+            }
+          }
+        }
+      }
     } catch (validationError: any) {
       // Log the error but don't fail the booking if validation query fails
       // This is a safety check, so we'll proceed if we can't verify
@@ -917,7 +970,75 @@ export async function POST(req: NextRequest) {
       createdAt: FieldValue.serverTimestamp(),
       updatedAt: FieldValue.serverTimestamp(),
     };
+
+    // ─── ATOMIC SLOT LOCK ───
+    // Use deterministic lock document IDs to prevent double-booking.
+    // Firestore's create() fails if the document already exists, so only the
+    // first request to reach this point will succeed — the second gets a 409.
+    const lockIds: string[] = [];
+    const svcList: Array<any> = (processedServices && Array.isArray(processedServices) && processedServices.length > 0)
+      ? processedServices
+      : [{ staffId: body.staffId || null, time: body.time, duration: body.duration }];
+
+    for (const svc of svcList) {
+      const svcStaffId = svc.staffId || body.staffId || "any";
+      const svcTime = svc.time || body.time;
+      if (!svcTime) continue;
+      // Deterministic ID: ownerUid_date_staffId_time (e.g. "abc123_2026-02-10_staffXYZ_09:00")
+      const lockId = `${String(body.ownerUid)}_${dateStr}_${svcStaffId}_${svcTime}`;
+      lockIds.push(lockId);
+    }
+
+    // Try to acquire all locks atomically
+    const acquiredLocks: string[] = [];
+    try {
+      for (const lockId of lockIds) {
+        const lockRef = db.collection("bookingSlotLocks").doc(lockId);
+        try {
+          await lockRef.create({
+            ownerUid: String(body.ownerUid),
+            date: dateStr,
+            bookingCode,
+            createdAt: Date.now(),
+            // Auto-expire after 10 minutes (cleanup safety net)
+            expiresAt: Date.now() + 10 * 60 * 1000,
+          });
+          acquiredLocks.push(lockId);
+        } catch (lockError: any) {
+          // ALREADY_EXISTS means another booking grabbed this slot first
+          if (lockError.code === 6 || lockError.code === "already-exists" ||
+              lockError.message?.includes("ALREADY_EXISTS") || lockError.message?.includes("already exists")) {
+            // Release any locks we already acquired
+            for (const acquired of acquiredLocks) {
+              await db.collection("bookingSlotLocks").doc(acquired).delete().catch(() => {});
+            }
+            console.log(`[BOOKING CONFLICT] Atomic lock failed for slot: ${lockId}`);
+            return NextResponse.json(
+              {
+                error: "Time slot already booked",
+                details: "Another customer just booked this slot. Please go back and choose a different time.",
+              },
+              { status: 409 }
+            );
+          }
+          throw lockError; // Re-throw unexpected errors
+        }
+      }
+    } catch (lockErr: any) {
+      // Clean up any acquired locks on unexpected error
+      for (const acquired of acquiredLocks) {
+        await db.collection("bookingSlotLocks").doc(acquired).delete().catch(() => {});
+      }
+      throw lockErr;
+    }
+
+    // Lock acquired — safe to create the booking
     const ref = await db.collection("bookings").add(payload);
+
+    // Update lock documents with the booking ID for traceability
+    for (const lockId of acquiredLocks) {
+      await db.collection("bookingSlotLocks").doc(lockId).update({ bookingId: ref.id }).catch(() => {});
+    }
     
     // Send email to customer when booking is created (Request Received)
     try {
@@ -1403,6 +1524,27 @@ export async function POST(req: NextRequest) {
       console.error("Error notifying salon owner:", ownerNotifError);
     }
     
+    // Release the slot hold for this session now that the booking is confirmed
+    if (sessionId) {
+      try {
+        const holdsToRelease = await db.collection("slotHolds")
+          .where("sessionId", "==", sessionId)
+          .where("status", "==", "active")
+          .get();
+        if (holdsToRelease.size > 0) {
+          const releaseBatch = db.batch();
+          for (const holdDoc of holdsToRelease.docs) {
+            releaseBatch.update(holdDoc.ref, { status: "converted", convertedToBookingId: ref.id, convertedAt: Date.now() });
+          }
+          await releaseBatch.commit();
+          console.log(`🔓 Booking ${bookingCode}: Released ${holdsToRelease.size} slot hold(s) for session ${sessionId}`);
+        }
+      } catch (holdReleaseError) {
+        console.error("Error releasing slot holds:", holdReleaseError);
+        // Don't fail the booking if hold release fails
+      }
+    }
+
     return NextResponse.json({ id: ref.id, bookingCode: bookingCode });
   } catch (e: any) {
     console.error("Create booking request API error:", e);
