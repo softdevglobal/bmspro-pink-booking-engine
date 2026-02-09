@@ -601,6 +601,55 @@ export async function POST(req: NextRequest) {
             staffId: body.staffId || null
           }];
 
+      // For "Any Staff" bookings, we need to check if ALL eligible staff are booked
+      // (not just if any single booking conflicts). Pre-fetch staff/service data if needed.
+      const hasAnyStaffService = servicesToCheck.some(s => !isValidStaffAssignment(s.staffId || body.staffId));
+      let eligibleStaffByService: Record<string, string[]> = {};
+
+      if (hasAnyStaffService) {
+        // Fetch staff and service data to determine eligible staff per service
+        const [staffSnapshot, servicesSnapshot] = await Promise.all([
+          db.collection("users")
+            .where("ownerUid", "==", String(body.ownerUid))
+            .get()
+            .catch(() => ({ docs: [] as any[] })),
+          db.collection("services")
+            .where("ownerUid", "==", String(body.ownerUid))
+            .get()
+            .catch(() => ({ docs: [] as any[] }))
+        ]);
+
+        const allStaff = (staffSnapshot.docs || []).map((d: any) => ({ id: d.id, ...d.data() }));
+        const allServices = (servicesSnapshot.docs || []).map((d: any) => ({ id: d.id, ...d.data() }));
+
+        for (const svc of servicesToCheck) {
+          const svcStaffId = svc.staffId || body.staffId;
+          if (isValidStaffAssignment(svcStaffId)) continue; // Skip specific staff services
+
+          const serviceId = svc.id || svc.serviceId || body.serviceId;
+          const serviceData = allServices.find((s: any) => String(s.id) === String(serviceId));
+
+          const eligible = allStaff.filter((st: any) => {
+            const role = (st.role || "").toString().toLowerCase();
+            if (role !== "salon_staff" && role !== "salon_branch_admin") return false;
+            if (st.status && st.status !== "Active") return false;
+
+            // Check service capability
+            if (serviceData?.staffIds && serviceData.staffIds.length > 0) {
+              const canPerform = serviceData.staffIds.some((id: string) =>
+                String(id) === st.id || String(id) === (st.uid || st.id)
+              );
+              if (!canPerform) return false;
+            }
+
+            // Check branch assignment
+            return st.branchId === String(body.branchId);
+          });
+
+          eligibleStaffByService[String(serviceId)] = eligible.map((s: any) => s.id);
+        }
+      }
+
       for (const newService of servicesToCheck) {
         const newServiceTime = newService.time || body.time;
         const newServiceDuration = newService.duration || body.duration;
@@ -610,8 +659,87 @@ export async function POST(req: NextRequest) {
 
         const newStartMinutes = timeToMinutes(newServiceTime);
         const newEndMinutes = newStartMinutes + newServiceDuration;
+        const newHasStaff = isValidStaffAssignment(newServiceStaffId);
 
-        // Check against all existing bookings
+        if (!newHasStaff) {
+          // ── "Any Staff" mode ──
+          // Instead of blocking on the first conflict, aggregate which eligible staff
+          // are booked and only reject if ALL of them are occupied at this time.
+          const serviceId = newService.id || newService.serviceId || body.serviceId;
+          const eligibleIds = eligibleStaffByService[String(serviceId)] || [];
+
+          if (eligibleIds.length === 0) {
+            // No eligible staff data available – skip validation (can't determine)
+            continue;
+          }
+
+          // Collect staff IDs that have overlapping bookings
+          const bookedStaffIds = new Set<string>();
+          // Also count existing "Any Staff" bookings that overlap (each consumes one staff slot)
+          let anyStaffBookingsOverlapping = 0;
+
+          for (const existingBooking of allExistingBookings) {
+            if (!isActiveStatus(existingBooking.status)) continue;
+
+            if (existingBooking.services && Array.isArray(existingBooking.services) && existingBooking.services.length > 0) {
+              for (const existingService of existingBooking.services) {
+                if (!existingService.time) continue;
+                const existingServiceStaffId = existingService.staffId || existingBooking.staffId || null;
+                const existingStartMinutes = timeToMinutes(existingService.time);
+                const existingDuration = existingService.duration || existingBooking.duration || 60;
+                const existingEndMinutes = existingStartMinutes + existingDuration;
+
+                if (!timeRangesOverlap(newStartMinutes, newEndMinutes, existingStartMinutes, existingEndMinutes)) continue;
+
+                if (isValidStaffAssignment(existingServiceStaffId)) {
+                  // Existing booking has a specific staff – mark that staff as busy
+                  if (eligibleIds.includes(existingServiceStaffId!)) {
+                    bookedStaffIds.add(existingServiceStaffId!);
+                  }
+                } else {
+                  // Existing booking is also "Any Staff" – it will consume one staff slot
+                  anyStaffBookingsOverlapping++;
+                }
+              }
+            } else {
+              if (!existingBooking.time) continue;
+              const existingStaffId = existingBooking.staffId || null;
+              const existingStartMinutes = timeToMinutes(existingBooking.time);
+              const existingDuration = existingBooking.duration || 60;
+              const existingEndMinutes = existingStartMinutes + existingDuration;
+
+              if (!timeRangesOverlap(newStartMinutes, newEndMinutes, existingStartMinutes, existingEndMinutes)) continue;
+
+              if (isValidStaffAssignment(existingStaffId)) {
+                if (eligibleIds.includes(existingStaffId!)) {
+                  bookedStaffIds.add(existingStaffId!);
+                }
+              } else {
+                anyStaffBookingsOverlapping++;
+              }
+            }
+          }
+
+          // Available = eligible staff not specifically booked, minus slots consumed by existing "Any Staff" bookings
+          const freeStaff = eligibleIds.length - bookedStaffIds.size - anyStaffBookingsOverlapping;
+
+          if (freeStaff <= 0) {
+            console.log(`[BOOKING CONFLICT] All ${eligibleIds.length} eligible staff are booked at ${newServiceTime} (${bookedStaffIds.size} specific + ${anyStaffBookingsOverlapping} any-staff bookings)`);
+            return NextResponse.json(
+              {
+                error: "Time slot fully booked",
+                details: `All available staff members are booked at ${newServiceTime}. Please choose a different time.`,
+              },
+              { status: 409 }
+            );
+          }
+
+          // This "Any Staff" service passed validation
+          continue;
+        }
+
+        // ── Specific staff mode ──
+        // Check against all existing bookings for the same specific staff
         for (const existingBooking of allExistingBookings) {
           // Skip if booking is not active
           if (!isActiveStatus(existingBooking.status)) continue;
@@ -623,22 +751,13 @@ export async function POST(req: NextRequest) {
               if (!existingService.time) continue;
               
               const existingServiceStaffId = existingService.staffId || existingBooking.staffId || null;
-              
-              // Determine if staff assignments conflict
-              const newHasStaff = isValidStaffAssignment(newServiceStaffId);
               const existingHasStaff = isValidStaffAssignment(existingServiceStaffId);
               
-              // Only check for conflicts if:
-              // 1. Both have the same specific staff assigned
-              // 2. Both have "any staff" (they compete for the same pool)
-              // 3. One has "any staff" and the other has specific staff (any staff blocks all)
-              const shouldCheckConflict = 
-                (newHasStaff && existingHasStaff && newServiceStaffId === existingServiceStaffId) || // Same specific staff
-                (!newHasStaff && !existingHasStaff) || // Both are "any staff"
-                (!newHasStaff && existingHasStaff) || // New is "any staff", existing has specific staff
-                (newHasStaff && !existingHasStaff); // New has specific staff, existing is "any staff"
+              // Only conflict if same specific staff, or existing is "any staff" (blocks the pool)
+              const shouldCheckConflict =
+                (existingHasStaff && newServiceStaffId === existingServiceStaffId) ||
+                (!existingHasStaff); // Existing "any staff" could be assigned to our staff
               
-              // Skip if different specific staff members (no conflict)
               if (!shouldCheckConflict) continue;
 
               const existingStartMinutes = timeToMinutes(existingService.time);
@@ -652,7 +771,7 @@ export async function POST(req: NextRequest) {
                     time: newServiceTime,
                     duration: newServiceDuration,
                     staffId: newServiceStaffId,
-                    staffType: newHasStaff ? "specific" : "any available"
+                    staffType: "specific"
                   },
                   existingService: {
                     time: existingService.time,
@@ -680,22 +799,13 @@ export async function POST(req: NextRequest) {
             if (!existingBooking.time) continue;
 
             const existingStaffId = existingBooking.staffId || null;
-            
-            // Determine if staff assignments conflict
-            const newHasStaff = isValidStaffAssignment(newServiceStaffId);
             const existingHasStaff = isValidStaffAssignment(existingStaffId);
             
-            // Only check for conflicts if:
-            // 1. Both have the same specific staff assigned
-            // 2. Both have "any staff" (they compete for the same pool)
-            // 3. One has "any staff" and the other has specific staff (any staff blocks all)
-            const shouldCheckConflict = 
-              (newHasStaff && existingHasStaff && newServiceStaffId === existingStaffId) || // Same specific staff
-              (!newHasStaff && !existingHasStaff) || // Both are "any staff"
-              (!newHasStaff && existingHasStaff) || // New is "any staff", existing has specific staff
-              (newHasStaff && !existingHasStaff); // New has specific staff, existing is "any staff"
+            // Only conflict if same specific staff, or existing is "any staff"
+            const shouldCheckConflict =
+              (existingHasStaff && newServiceStaffId === existingStaffId) ||
+              (!existingHasStaff);
             
-            // Skip if different specific staff members (no conflict)
             if (!shouldCheckConflict) continue;
 
             const existingStartMinutes = timeToMinutes(existingBooking.time);
@@ -709,7 +819,7 @@ export async function POST(req: NextRequest) {
                   time: newServiceTime,
                   duration: newServiceDuration,
                   staffId: newServiceStaffId,
-                  staffType: newHasStaff ? "specific" : "any available"
+                  staffType: "specific"
                 },
                 existingBooking: {
                   time: existingBooking.time,
