@@ -10,6 +10,7 @@ import { createCustomerDocument, incrementCustomerBookings } from "@/lib/custome
 import { doc, updateDoc, serverTimestamp } from "firebase/firestore";
 import NotificationPanel from "@/components/NotificationPanel";
 import { getCurrentDateTimeInTimezone } from "@/lib/timezone";
+import { apiUrl } from "@/lib/apiUrl";
 
 interface BookPageContentProps {
   /** When provided (e.g., from [slug] route), skips searchParams lookup */
@@ -93,7 +94,7 @@ function BookPageContent({ resolvedOwnerUid }: BookPageContentProps = {}) {
         const params = new URLSearchParams();
         params.set("limit", "50");
 
-        const response = await fetch(`/api/notifications?${params.toString()}`, {
+        const response = await fetch(apiUrl(`/api/notifications?${params.toString()}`), {
           method: "GET",
           headers: {
             "Authorization": `Bearer ${token}`,
@@ -293,7 +294,7 @@ function BookPageContent({ resolvedOwnerUid }: BookPageContentProps = {}) {
     const loadData = async () => {
       try {
         // Load owner/salon name via API
-        const ownerRes = await fetch(`/api/owner?ownerUid=${ownerUid}`);
+        const ownerRes = await fetch(apiUrl(`/api/owner?ownerUid=${ownerUid}`));
         if (ownerRes.ok) {
           const ownerData = await ownerRes.json();
           setSalonName(ownerData.salonName || "Salon");
@@ -305,21 +306,21 @@ function BookPageContent({ resolvedOwnerUid }: BookPageContentProps = {}) {
         }
 
         // Load branches via API
-        const branchesRes = await fetch(`/api/branches?ownerUid=${ownerUid}`);
+        const branchesRes = await fetch(apiUrl(`/api/branches?ownerUid=${ownerUid}`));
         if (branchesRes.ok) {
           const branchesData = await branchesRes.json();
           setBranches(branchesData.branches || []);
         }
 
         // Load services via API
-        const servicesRes = await fetch(`/api/services?ownerUid=${ownerUid}`);
+        const servicesRes = await fetch(apiUrl(`/api/services?ownerUid=${ownerUid}`));
         if (servicesRes.ok) {
           const servicesData = await servicesRes.json();
           setServicesList(servicesData.services || []);
         }
 
         // Load staff via API
-        const staffRes = await fetch(`/api/staff?ownerUid=${ownerUid}`);
+        const staffRes = await fetch(apiUrl(`/api/staff?ownerUid=${ownerUid}`));
         if (staffRes.ok) {
           const staffData = await staffRes.json();
           setStaffList(staffData.staff || []);
@@ -392,7 +393,7 @@ function BookPageContent({ resolvedOwnerUid }: BookPageContentProps = {}) {
     setAuthLoading(true);
 
     try {
-      const response = await fetch("/api/auth/register", {
+      const response = await fetch(apiUrl("/api/auth/register"), {
         method: "POST",
         headers: { "Content-Type": "application/json" },
         body: JSON.stringify({
@@ -437,7 +438,7 @@ function BookPageContent({ resolvedOwnerUid }: BookPageContentProps = {}) {
       const userCredential = await signInWithEmailAndPassword(auth, authEmail, authPassword);
       
       // Verify customer is registered for this specific salon
-      const verifyResponse = await fetch("/api/auth/login", {
+      const verifyResponse = await fetch(apiUrl("/api/auth/login"), {
         method: "POST",
         headers: { "Content-Type": "application/json" },
         body: JSON.stringify({
@@ -1222,7 +1223,7 @@ function BookPageContent({ resolvedOwnerUid }: BookPageContentProps = {}) {
                         setForgotPasswordSuccess("");
 
                         try {
-                          const response = await fetch("/api/auth/forgot-password", {
+                          const response = await fetch(apiUrl("/api/auth/forgot-password"), {
                             method: "POST",
                             headers: { "Content-Type": "application/json" },
                             body: JSON.stringify({
@@ -1341,7 +1342,7 @@ function BookPageContent({ resolvedOwnerUid }: BookPageContentProps = {}) {
                         setAuthError("");
 
                         try {
-                          const response = await fetch("/api/auth/verify-reset-code", {
+                          const response = await fetch(apiUrl("/api/auth/verify-reset-code"), {
                             method: "POST",
                             headers: { "Content-Type": "application/json" },
                             body: JSON.stringify({
@@ -1416,7 +1417,7 @@ function BookPageContent({ resolvedOwnerUid }: BookPageContentProps = {}) {
                           setForgotPasswordSuccess("");
 
                           try {
-                            const response = await fetch("/api/auth/forgot-password", {
+                            const response = await fetch(apiUrl("/api/auth/forgot-password"), {
                               method: "POST",
                               headers: { "Content-Type": "application/json" },
                               body: JSON.stringify({
@@ -1520,7 +1521,7 @@ function BookPageContent({ resolvedOwnerUid }: BookPageContentProps = {}) {
                         setAuthError("");
 
                         try {
-                          const response = await fetch("/api/auth/reset-password", {
+                          const response = await fetch(apiUrl("/api/auth/reset-password"), {
                             method: "POST",
                             headers: { "Content-Type": "application/json" },
                             body: JSON.stringify({
@@ -3180,7 +3181,7 @@ function BookPageContent({ resolvedOwnerUid }: BookPageContentProps = {}) {
 
                   const params = new URLSearchParams();
                   params.set("limit", "50");
-                  const response = await fetch(`/api/notifications?${params.toString()}`, {
+                  const response = await fetch(apiUrl(`/api/notifications?${params.toString()}`), {
                     method: "GET",
                     headers: {
                       "Authorization": `Bearer ${token}`,

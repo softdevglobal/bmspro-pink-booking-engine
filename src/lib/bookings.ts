@@ -2,6 +2,7 @@ import { db } from "@/lib/firebase";
 import { addDoc, collection, serverTimestamp, query, where, onSnapshot, DocumentData, getDocs } from "firebase/firestore";
 import type { BookingStatus } from "./bookingTypes";
 import { localToUTC } from "@/lib/timezone";
+import { apiUrl } from "@/lib/apiUrl";
 
 /**
  * Generate a readable booking code
@@ -61,7 +62,7 @@ export async function createBooking(input: BookingInput): Promise<{ id: string; 
   
   try {
     // Try API route first (uses Firebase Admin SDK, bypasses security rules)
-    const res = await fetch("/api/booking-requests", {
+    const res = await fetch(apiUrl("/api/booking-requests"), {
       method: "POST",
       headers: {
         "Content-Type": "application/json",

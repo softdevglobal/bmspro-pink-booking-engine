@@ -3,6 +3,7 @@
 import { useState, useEffect } from "react";
 import { Notification } from "@/lib/notifications";
 import { auth } from "@/lib/firebase";
+import { apiUrl } from "@/lib/apiUrl";
 
 interface NotificationPanelProps {
   isOpen: boolean;
@@ -69,7 +70,7 @@ export default function NotificationPanel({
       // Fetch up to 200 notifications
       params.set("limit", "200");
 
-      const response = await fetch(`/api/notifications?${params.toString()}`, {
+      const response = await fetch(apiUrl(`/api/notifications?${params.toString()}`), {
         method: "GET",
         headers: {
           "Authorization": `Bearer ${token}`,
@@ -100,7 +101,7 @@ export default function NotificationPanel({
         return;
       }
 
-      const response = await fetch(`/api/notifications/${notificationId}/read`, {
+      const response = await fetch(apiUrl(`/api/notifications/${notificationId}/read`), {
         method: "PATCH",
         headers: {
           "Authorization": `Bearer ${token}`,
@@ -142,7 +143,7 @@ export default function NotificationPanel({
         throw new Error("Authentication required");
       }
 
-      const response = await fetch(`/api/notifications/${notificationToDelete}`, {
+      const response = await fetch(apiUrl(`/api/notifications/${notificationToDelete}`), {
         method: "DELETE",
         headers: {
           "Authorization": `Bearer ${token}`,
