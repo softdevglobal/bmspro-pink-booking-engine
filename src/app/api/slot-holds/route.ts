@@ -47,6 +47,38 @@ function timeToMinutes(timeStr: string): number {
 }
 
 /**
+ * Get the day-of-week name for a date string (YYYY-MM-DD).
+ * Uses noon to avoid timezone boundary issues.
+ */
+function getDayOfWeek(dateStr: string): string {
+  const dateObj = new Date(dateStr + "T12:00:00");
+  const days = ["Sunday", "Monday", "Tuesday", "Wednesday", "Thursday", "Friday", "Saturday"];
+  return days[dateObj.getDay()];
+}
+
+/**
+ * Check if a staff member is assigned to a branch on a given day,
+ * considering weeklySchedule first, then falling back to primary branchId.
+ * This must match the client-side getAvailableStaffForService logic.
+ */
+function isStaffAssignedToBranch(staff: any, branchId: string, dayOfWeek: string): boolean {
+  // Check weeklySchedule first (takes priority)
+  if (dayOfWeek && staff.weeklySchedule && typeof staff.weeklySchedule === "object") {
+    const daySchedule = staff.weeklySchedule[dayOfWeek];
+    if (daySchedule && daySchedule.branchId) {
+      return daySchedule.branchId === branchId;
+    }
+    // If schedule entry is null/undefined for this day, staff is not working
+    if (daySchedule === null || daySchedule === undefined) {
+      return false;
+    }
+    // Schedule exists but no branchId specified - fall through to default
+  }
+  // Default: check staff's primary branchId
+  return staff.branchId === branchId;
+}
+
+/**
  * POST /api/slot-holds
  *
  * Create a temporary hold on one or more time slots.
@@ -142,6 +174,8 @@ export async function POST(req: NextRequest) {
     let eligibleStaffByService: Record<string, string[]> = {};
 
     if (hasAnyStaffService) {
+      const dayOfWeek = getDayOfWeek(String(date));
+
       const [staffSnapshot, servicesSnapshot] = await Promise.all([
         db.collection("users")
           .where("ownerUid", "==", String(ownerUid))
@@ -175,11 +209,12 @@ export async function POST(req: NextRequest) {
             if (!canPerform) return false;
           }
 
-          // Check branch assignment
-          return st.branchId === String(branchId);
+          // Check branch assignment (weeklySchedule + primary branchId)
+          return isStaffAssignedToBranch(st, String(branchId), dayOfWeek);
         });
 
         eligibleStaffByService[String(serviceId)] = eligible.map((s: any) => s.id);
+        console.log(`[SLOT HOLD] Service ${serviceId}: ${eligible.length} eligible staff [${eligible.map((s: any) => s.id).join(', ')}] (day=${dayOfWeek})`);
       }
     }
 

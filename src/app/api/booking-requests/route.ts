@@ -21,6 +21,33 @@ function isValidStaffAssignment(staffId?: string | null): boolean {
 }
 
 /**
+ * Get the day-of-week name for a date string (YYYY-MM-DD).
+ * Uses noon to avoid timezone boundary issues.
+ */
+function getDayOfWeek(dateStr: string): string {
+  const dateObj = new Date(dateStr + "T12:00:00");
+  const days = ["Sunday", "Monday", "Tuesday", "Wednesday", "Thursday", "Friday", "Saturday"];
+  return days[dateObj.getDay()];
+}
+
+/**
+ * Check if a staff member is assigned to a branch on a given day,
+ * considering weeklySchedule first, then falling back to primary branchId.
+ */
+function isStaffAssignedToBranch(staff: any, branchId: string, dayOfWeek: string): boolean {
+  if (dayOfWeek && staff.weeklySchedule && typeof staff.weeklySchedule === "object") {
+    const daySchedule = staff.weeklySchedule[dayOfWeek];
+    if (daySchedule && daySchedule.branchId) {
+      return daySchedule.branchId === branchId;
+    }
+    if (daySchedule === null || daySchedule === undefined) {
+      return false;
+    }
+  }
+  return staff.branchId === branchId;
+}
+
+/**
  * Check if a staff ID represents "Any Staff" (unassigned)
  */
 function isAnyStaff(staffId?: string | null): boolean {
@@ -617,6 +644,8 @@ export async function POST(req: NextRequest) {
       let eligibleStaffByService: Record<string, string[]> = {};
 
       if (hasAnyStaffService) {
+        const dayOfWeek = getDayOfWeek(dateStr);
+
         // Fetch staff and service data to determine eligible staff per service
         const [staffSnapshot, servicesSnapshot] = await Promise.all([
           db.collection("users")
@@ -652,11 +681,12 @@ export async function POST(req: NextRequest) {
               if (!canPerform) return false;
             }
 
-            // Check branch assignment
-            return st.branchId === String(body.branchId);
+            // Check branch assignment (weeklySchedule + primary branchId)
+            return isStaffAssignedToBranch(st, String(body.branchId), dayOfWeek);
           });
 
           eligibleStaffByService[String(serviceId)] = eligible.map((s: any) => s.id);
+          console.log(`[BOOKING REQUEST] Service ${serviceId}: ${eligible.length} eligible staff [${eligible.map((s: any) => s.id).join(', ')}] (day=${dayOfWeek})`);
         }
       }
 
