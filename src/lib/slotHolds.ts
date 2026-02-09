@@ -161,6 +161,9 @@ export function subscribeSlotHolds(
  * @param time - HH:mm
  * @param duration - Service duration in minutes
  * @param mySessionId - Current session ID to exclude own holds
+ * @param eligibleStaffIds - (optional) For "Any Staff" mode, the list of eligible staff IDs.
+ *   When provided and staffId is null, the slot is only considered held if ALL eligible staff
+ *   are occupied by holds from other sessions.
  * @returns true if the slot is held by someone else
  */
 export function isSlotHeldByOther(
@@ -169,11 +172,42 @@ export function isSlotHeldByOther(
   time: string,
   duration: number,
   mySessionId: string,
+  eligibleStaffIds?: string[],
 ): boolean {
   const now = Date.now();
   const newStart = timeToMinutes(time);
   const newEnd = newStart + duration;
 
+  // "Any Staff" mode: only held if ALL eligible staff are consumed by other holds
+  if (!staffId && eligibleStaffIds && eligibleStaffIds.length > 0) {
+    const heldStaffIds = new Set<string>();
+    let anyStaffHoldsOverlapping = 0;
+
+    for (const hold of holds) {
+      if (hold.sessionId === mySessionId) continue;
+      if (hold.expiresAt <= now) continue;
+      if (!Array.isArray(hold.services)) continue;
+
+      for (const svc of hold.services) {
+        if (!svc.time) continue;
+        const holdStart = timeToMinutes(svc.time);
+        const holdEnd = holdStart + (svc.duration || 60);
+
+        if (newStart < holdEnd && holdStart < newEnd) {
+          if (svc.staffId && eligibleStaffIds.includes(svc.staffId)) {
+            heldStaffIds.add(svc.staffId);
+          } else if (!svc.staffId) {
+            anyStaffHoldsOverlapping++;
+          }
+        }
+      }
+    }
+
+    const freeStaff = eligibleStaffIds.length - heldStaffIds.size - anyStaffHoldsOverlapping;
+    return freeStaff <= 0;
+  }
+
+  // Specific staff mode (original logic)
   for (const hold of holds) {
     // Skip own holds
     if (hold.sessionId === mySessionId) continue;

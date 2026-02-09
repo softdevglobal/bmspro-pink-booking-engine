@@ -1120,12 +1120,15 @@ function BookPageContent({ resolvedOwnerUid }: BookPageContentProps = {}) {
       const blockedResult = isSlotBlockedByCurrentSelection(slotStartMinutes);
       
       // Check if slot is held by another customer (cinema-seat locking)
+      // For "Any Staff" mode, pass eligible staff IDs so holds are only blocking
+      // when ALL eligible staff are consumed by other sessions' holds.
       const isHeld = isSlotHeldByOther(
         slotHolds,
         staffIdForService || null,
         timeStr,
         serviceDuration,
         sessionId,
+        isAnyStaffSelected ? eligibleStaffIds : undefined,
       );
       
       if (occupiedResult.occupied) {
