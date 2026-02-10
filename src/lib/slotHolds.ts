@@ -154,16 +154,28 @@ export function subscribeSlotHolds(
 }
 
 /**
+ * Check if a staffId represents "Any Available Staff" (not a specific staff assignment).
+ * Matches the server-side isValidStaffAssignment logic (inverted).
+ */
+function isAnyStaffValue(sid: string | null | undefined): boolean {
+  if (!sid) return true;
+  const s = sid.toString().toLowerCase().trim();
+  if (s === "" || s === "null") return true;
+  if (s.includes("any")) return true;
+  return false;
+}
+
+/**
  * Check if a specific time + staff combination is held by another session.
  *
  * @param holds - Active holds from subscribeSlotHolds (pre-filtered for expiry by caller)
- * @param staffId - The staff ID to check (null = "Any Staff")
+ * @param staffId - The staff ID to check (null/"any" = "Any Staff")
  * @param time - HH:mm
  * @param duration - Service duration in minutes
  * @param mySessionId - Current session ID to exclude own holds
  * @param eligibleStaffIds - (optional) For "Any Staff" mode, the list of eligible staff IDs.
- *   When provided and staffId is null, the slot is only considered held if ALL eligible staff
- *   are occupied by holds from other sessions.
+ *   When provided and staffId is null/any, the slot is only considered held if ALL eligible
+ *   staff are occupied by holds from other sessions.
  * @returns true if the slot is held by someone else
  */
 export function isSlotHeldByOther(
@@ -178,8 +190,11 @@ export function isSlotHeldByOther(
   const newStart = timeToMinutes(time);
   const newEnd = newStart + duration;
 
-  // "Any Staff" mode: only held if ALL eligible staff are consumed by other holds
-  if (!staffId && eligibleStaffIds && eligibleStaffIds.length > 0) {
+  // "Any Staff" mode: only held if ALL eligible staff are consumed by other holds + bookings.
+  // Triggered when staffId is null/"any"/empty AND eligibleStaffIds are provided.
+  const isAnyStaff = isAnyStaffValue(staffId);
+
+  if (isAnyStaff && eligibleStaffIds && eligibleStaffIds.length > 0) {
     const heldStaffIds = new Set<string>();
     let anyStaffHoldsOverlapping = 0;
 
@@ -194,9 +209,11 @@ export function isSlotHeldByOther(
         const holdEnd = holdStart + (svc.duration || 60);
 
         if (newStart < holdEnd && holdStart < newEnd) {
-          if (svc.staffId && eligibleStaffIds.includes(svc.staffId)) {
+          // Use isAnyStaffValue to properly detect "any" staffId in holds
+          if (!isAnyStaffValue(svc.staffId) && eligibleStaffIds.includes(svc.staffId)) {
             heldStaffIds.add(svc.staffId);
-          } else if (!svc.staffId) {
+          } else if (isAnyStaffValue(svc.staffId)) {
+            // Hold is also "Any Staff" — it consumes one staff slot from the pool
             anyStaffHoldsOverlapping++;
           }
         }
@@ -223,7 +240,7 @@ export function isSlotHeldByOther(
       // Check time overlap
       if (newStart < holdEnd && holdStart < newEnd) {
         // If both have specific staff, only conflict if same staff
-        if (staffId && svc.staffId && staffId !== svc.staffId) continue;
+        if (staffId && !isAnyStaffValue(staffId) && svc.staffId && !isAnyStaffValue(svc.staffId) && staffId !== svc.staffId) continue;
         return true;
       }
     }
