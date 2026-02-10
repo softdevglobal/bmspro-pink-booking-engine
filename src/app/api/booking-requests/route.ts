@@ -901,6 +901,71 @@ export async function POST(req: NextRequest) {
         const newEndMinutes = newStartMinutes + newServiceDuration;
         const newHasStaff = isValidStaffAssignment(newServiceStaffId);
 
+        if (!newHasStaff) {
+          // ── "Any Staff" mode: use pool model for holds ──
+          // Only block if ALL eligible staff are consumed by holds + bookings combined.
+          const serviceId = newService.id || newService.serviceId || body.serviceId;
+          const eligibleIds = eligibleStaffByService[String(serviceId)] || [];
+
+          if (eligibleIds.length > 0) {
+            // Re-count booked staff (from bookings already counted above) + holds
+            const holdBookedStaffIds = new Set<string>();
+            let holdAnyStaffCount = 0;
+
+            // Count from existing bookings (same logic as above)
+            for (const existingBooking of allExistingBookings) {
+              if (!isActiveStatus(existingBooking.status)) continue;
+              const existServices = (existingBooking.services && Array.isArray(existingBooking.services) && existingBooking.services.length > 0)
+                ? existingBooking.services
+                : [{ time: existingBooking.time, duration: existingBooking.duration, staffId: existingBooking.staffId }];
+              for (const existSvc of existServices) {
+                if (!existSvc.time) continue;
+                const existStaffId = existSvc.staffId || existingBooking.staffId || null;
+                const existStart = timeToMinutes(existSvc.time);
+                const existEnd = existStart + (existSvc.duration || existingBooking.duration || 60);
+                if (!timeRangesOverlap(newStartMinutes, newEndMinutes, existStart, existEnd)) continue;
+                if (isValidStaffAssignment(existStaffId)) {
+                  if (eligibleIds.includes(existStaffId!)) holdBookedStaffIds.add(existStaffId!);
+                } else {
+                  holdAnyStaffCount++;
+                }
+              }
+            }
+
+            // Count from other active holds
+            for (const hold of activeOtherHolds) {
+              if (!Array.isArray(hold.services)) continue;
+              for (const holdSvc of hold.services) {
+                if (!holdSvc.time) continue;
+                const holdStaffId = holdSvc.staffId || null;
+                const holdStart = timeToMinutes(holdSvc.time);
+                const holdEnd = holdStart + (holdSvc.duration || 60);
+                if (!timeRangesOverlap(newStartMinutes, newEndMinutes, holdStart, holdEnd)) continue;
+                if (isValidStaffAssignment(holdStaffId)) {
+                  if (eligibleIds.includes(holdStaffId!)) holdBookedStaffIds.add(holdStaffId!);
+                } else {
+                  holdAnyStaffCount++;
+                }
+              }
+            }
+
+            const freeStaff = eligibleIds.length - holdBookedStaffIds.size - holdAnyStaffCount;
+            if (freeStaff <= 0) {
+              console.log(`[BOOKING CONFLICT] All ${eligibleIds.length} eligible staff consumed by holds+bookings at ${newServiceTime}`);
+              return NextResponse.json(
+                {
+                  error: "Time slot is temporarily reserved",
+                  details: `All available staff are reserved at ${newServiceTime}. Please wait or choose a different time.`,
+                },
+                { status: 409 }
+              );
+            }
+          }
+          // "Any Staff" hold check passed
+          continue;
+        }
+
+        // ── Specific staff mode: original per-staff hold check ──
         for (const hold of activeOtherHolds) {
           if (!Array.isArray(hold.services)) continue;
           for (const holdSvc of hold.services) {
@@ -1005,17 +1070,28 @@ export async function POST(req: NextRequest) {
     // Use deterministic lock document IDs to prevent double-booking.
     // Firestore's create() fails if the document already exists, so only the
     // first request to reach this point will succeed — the second gets a 409.
+    //
+    // For "Any Staff" bookings: the lock ID includes the bookingCode to make it
+    // unique per booking.  The availability validation above already confirmed
+    // that at least one eligible staff member is free, so each "Any Staff"
+    // booking should be allowed independently.  Using a single "any" token
+    // would incorrectly block the second "Any Staff" booking even when staff
+    // are still available.
     const lockIds: string[] = [];
     const svcList: Array<any> = (processedServices && Array.isArray(processedServices) && processedServices.length > 0)
       ? processedServices
       : [{ staffId: body.staffId || null, time: body.time, duration: body.duration }];
 
     for (const svc of svcList) {
-      const svcStaffId = svc.staffId || body.staffId || "any";
+      const svcStaffId = svc.staffId || body.staffId || null;
       const svcTime = svc.time || body.time;
       if (!svcTime) continue;
-      // Deterministic ID: ownerUid_date_staffId_time (e.g. "abc123_2026-02-10_staffXYZ_09:00")
-      const lockId = `${String(body.ownerUid)}_${dateStr}_${svcStaffId}_${svcTime}`;
+
+      // For specific staff: deterministic ID prevents double-booking the same staff/time.
+      // For "Any Staff": include bookingCode so each booking gets its own lock
+      // (availability was already validated above).
+      const staffToken = isValidStaffAssignment(svcStaffId) ? svcStaffId : `any_${bookingCode}`;
+      const lockId = `${String(body.ownerUid)}_${dateStr}_${staffToken}_${svcTime}`;
       lockIds.push(lockId);
     }
 
@@ -1038,6 +1114,30 @@ export async function POST(req: NextRequest) {
           // ALREADY_EXISTS means another booking grabbed this slot first
           if (lockError.code === 6 || lockError.code === "already-exists" ||
               lockError.message?.includes("ALREADY_EXISTS") || lockError.message?.includes("already exists")) {
+            // Check if the existing lock is stale/expired before giving up
+            const existingLock = await lockRef.get().catch(() => null);
+            if (existingLock && existingLock.exists) {
+              const lockData = existingLock.data();
+              if (lockData && lockData.expiresAt && lockData.expiresAt < Date.now()) {
+                // Lock has expired — delete it and retry
+                console.log(`[LOCK CLEANUP] Deleting expired lock: ${lockId}`);
+                await lockRef.delete().catch(() => {});
+                try {
+                  await lockRef.create({
+                    ownerUid: String(body.ownerUid),
+                    date: dateStr,
+                    bookingCode,
+                    createdAt: Date.now(),
+                    expiresAt: Date.now() + 10 * 60 * 1000,
+                  });
+                  acquiredLocks.push(lockId);
+                  continue; // Successfully acquired after cleanup
+                } catch (_retryErr) {
+                  // Another request beat us to it — fall through to conflict
+                }
+              }
+            }
+
             // Release any locks we already acquired
             for (const acquired of acquiredLocks) {
               await db.collection("bookingSlotLocks").doc(acquired).delete().catch(() => {});
