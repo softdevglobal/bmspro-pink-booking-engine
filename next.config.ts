@@ -24,10 +24,7 @@ const nextConfig: NextConfig = {
             key: 'X-Content-Type-Options',
             value: 'nosniff',
           },
-          {
-            key: 'X-Frame-Options',
-            value: 'DENY',
-          },
+          // X-Frame-Options removed to allow iframe embedding
           {
             key: 'X-XSS-Protection',
             value: '1; mode=block',

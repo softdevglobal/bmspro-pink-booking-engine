@@ -71,7 +71,7 @@ export function middleware(request: NextRequest) {
 
 function addSecurityHeaders(response: NextResponse) {
   response.headers.set("X-Content-Type-Options", "nosniff");
-  response.headers.set("X-Frame-Options", "DENY");
+  // X-Frame-Options removed to allow iframe embedding
   response.headers.set("X-XSS-Protection", "1; mode=block");
   response.headers.set("Referrer-Policy", "strict-origin-when-cross-origin");
 }
