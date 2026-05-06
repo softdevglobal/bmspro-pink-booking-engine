@@ -20,9 +20,12 @@ import {
   HOLD_DURATION_SECONDS,
   type SlotHoldResult,
 } from "@/lib/slotHolds";
+import { formatInTimeZone } from "date-fns-tz";
 import {
   filterApprovedLeaves,
+  hideStaffChipForApprovedLeaveOnDate,
   isStaffUnavailableDueToApprovedLeave,
+  staffUidAliasListForLeave,
   type LeaveRequestLike,
 } from "@/lib/staffLeaveOverlap";
 
@@ -383,25 +386,31 @@ function BookPageContent({ resolvedOwnerUid }: BookPageContentProps = {}) {
 
   // Subscribe to bookings for selected date
   useEffect(() => {
-    if (!ownerUid || !bkDate) return;
-    
-    const dateStr = formatLocalYmd(bkDate);
+    if (!ownerUid || !bkDate || !bkBranchId) return;
+
+    const br = branches.find((b) => b.id === bkBranchId);
+    const tz = br?.timezone || "Australia/Sydney";
+    const dateStr = formatInTimeZone(bkDate, tz, "yyyy-MM-dd");
+
     const unsub = subscribeBookingsForOwnerAndDate(ownerUid, dateStr, (data) => {
       setBookings(data as any);
     });
-    
+
     return () => unsub();
-  }, [ownerUid, bkDate]);
+  }, [ownerUid, bkDate, bkBranchId, branches]);
 
   // Subscribe to real-time slot holds for the selected date
   useEffect(() => {
-    if (!ownerUid || !bkDate) return;
-    const dateStr = formatLocalYmd(bkDate);
+    if (!ownerUid || !bkDate || !bkBranchId) return;
+    const br = branches.find((b) => b.id === bkBranchId);
+    const tz = br?.timezone || "Australia/Sydney";
+    const dateStr = formatInTimeZone(bkDate, tz, "yyyy-MM-dd");
+
     const unsub = subscribeSlotHolds(ownerUid, dateStr, (holds) => {
       setSlotHolds(holds);
     });
     return () => unsub();
-  }, [ownerUid, bkDate]);
+  }, [ownerUid, bkDate, bkBranchId, branches]);
 
   // Hold countdown timer - ticks every second while a hold is active (internal tracking only)
   useEffect(() => {
@@ -579,6 +588,9 @@ function BookPageContent({ resolvedOwnerUid }: BookPageContentProps = {}) {
       if (pendingStep3Navigation) {
         setPendingStep3Navigation(false);
         if (bkDate && bkBranchId && bkSelectedServices.length > 0) {
+          const holdBranchTz =
+            branches.find((b) => b.id === bkBranchId)?.timezone || "Australia/Sydney";
+          const holdDateStr = formatInTimeZone(bkDate, holdBranchTz, "yyyy-MM-dd");
           const holdServices = bkSelectedServices.map((serviceId) => {
             const service = servicesList.find((s) => String(s.id) === String(serviceId));
             return {
@@ -593,7 +605,7 @@ function BookPageContent({ resolvedOwnerUid }: BookPageContentProps = {}) {
             const hold = await createSlotHold(
               ownerUid,
               bkBranchId,
-              formatLocalYmd(bkDate),
+              holdDateStr,
               holdServices,
               auth.currentUser?.uid || null,
             );
@@ -840,9 +852,9 @@ function BookPageContent({ resolvedOwnerUid }: BookPageContentProps = {}) {
     const branchTodayDate = branchNow.date; // YYYY-MM-DD in branch timezone
     const branchNowTime = branchNow.time; // HH:mm in branch timezone
     
-    // Check if selected date is today IN THE BRANCH'S TIMEZONE
-    const selectedDateStr = formatLocalYmd(bkDate);
-    const isToday = selectedDateStr === branchTodayDate;
+    // Wall calendar date in branch TZ (must match approved-leave overlap + Firestore booking `date`)
+    const bookingYmd = formatInTimeZone(bkDate, branchTimezone, "yyyy-MM-dd");
+    const isToday = bookingYmd === branchTodayDate;
     
     // Calculate current minutes based on branch's local time
     const currentMinutes = isToday 
@@ -860,17 +872,19 @@ function BookPageContent({ resolvedOwnerUid }: BookPageContentProps = {}) {
     /** Eligible at this slot start (excludes approved leave overlap for that interval). */
     const eligibleStaffIdsForSlot = (slotStartMin: number): string[] => {
       if (!isAnyStaffSelected || !forServiceId) return [];
-      return branchServiceEligibleIds.filter(
-        (id) =>
-          !isStaffUnavailableDueToApprovedLeave(
-            approvedLeaves,
-            id,
-            selectedDateStr,
-            slotStartMin,
-            serviceDuration,
-            branchTimezone
-          )
-      );
+      return branchServiceEligibleIds.filter((id) => {
+        const stRow = staffList.find((s) => String(s.id) === String(id));
+        const aliases = staffUidAliasListForLeave(stRow);
+        return !isStaffUnavailableDueToApprovedLeave(
+          approvedLeaves,
+          id,
+          bookingYmd,
+          slotStartMin,
+          serviceDuration,
+          branchTimezone,
+          aliases
+        );
+      });
     };
     
     // Use centralized helper to check if booking status should block slots
@@ -1159,14 +1173,16 @@ function BookPageContent({ resolvedOwnerUid }: BookPageContentProps = {}) {
       // Specific staff mode (existing logic)
       if (!staffIdForService) return { occupied: false };
 
+      const stPick = staffList.find((s) => String(s.id) === String(staffIdForService));
       if (
         isStaffUnavailableDueToApprovedLeave(
           approvedLeaves,
           String(staffIdForService),
-          selectedDateStr,
+          bookingYmd,
           slotStartMin,
           serviceDuration,
-          branchTimezone
+          branchTimezone,
+          staffUidAliasListForLeave(stPick)
         )
       ) {
         return { occupied: true, reason: 'staff_on_leave' };
@@ -1308,7 +1324,10 @@ function BookPageContent({ resolvedOwnerUid }: BookPageContentProps = {}) {
     }
     
     const service = servicesList.find(s => String(s.id) === String(serviceId));
-    
+    const selectedBranch = branches.find((b) => b.id === bkBranchId);
+    const branchTz = selectedBranch?.timezone || "Australia/Sydney";
+    const bookingYmd = bkDate ? formatInTimeZone(bkDate, branchTz, "yyyy-MM-dd") : null;
+
     return staffList.filter((st) => {
       // Only show active staff
       if (st.status && st.status !== "Active") return false;
@@ -1339,6 +1358,15 @@ function BookPageContent({ resolvedOwnerUid }: BookPageContentProps = {}) {
       
       // Default: check staff's primary branchId
       return st.branchId === bkBranchId;
+    }).filter((st) => {
+      if (!bkDate || !bookingYmd) return true;
+      return !hideStaffChipForApprovedLeaveOnDate(
+        approvedLeaves,
+        st.id,
+        staffUidAliasListForLeave(st),
+        bookingYmd,
+        branchTz
+      );
     });
   };
   
@@ -1439,7 +1467,7 @@ function BookPageContent({ resolvedOwnerUid }: BookPageContentProps = {}) {
         branchId: bkBranchId,
         branchName: selectedBranch?.name || "",
         branchTimezone: selectedBranch?.timezone || "Australia/Sydney", // Include branch timezone
-        date: formatLocalYmd(bkDate),
+        date: formatInTimeZone(bkDate, selectedBranch?.timezone || "Australia/Sydney", "yyyy-MM-dd"),
         time: earliestTime, // Use the earliest service time
         duration: totalDuration,
         status: "Pending",
@@ -3148,6 +3176,9 @@ function BookPageContent({ resolvedOwnerUid }: BookPageContentProps = {}) {
 
                     // Create slot hold FIRST — block navigation until confirmed
                     if (bkDate && bkBranchId && bkSelectedServices.length > 0) {
+                      const holdBranchTz =
+                        branches.find((b) => b.id === bkBranchId)?.timezone || "Australia/Sydney";
+                      const holdDateStr = formatInTimeZone(bkDate, holdBranchTz, "yyyy-MM-dd");
                       const holdServices = bkSelectedServices.map((serviceId) => {
                         const service = servicesList.find((s) => String(s.id) === String(serviceId));
                         return {
@@ -3163,7 +3194,7 @@ function BookPageContent({ resolvedOwnerUid }: BookPageContentProps = {}) {
                         const hold = await createSlotHold(
                           ownerUid,
                           bkBranchId!,
-                          formatLocalYmd(bkDate),
+                          holdDateStr,
                           holdServices,
                           currentCustomer?.uid || null,
                         );

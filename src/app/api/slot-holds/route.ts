@@ -3,7 +3,9 @@ import { adminDb } from "@/lib/firebaseAdmin";
 import { shouldBlockSlots } from "@/lib/bookingTypes";
 import {
   filterApprovedLeaves,
+  findStaffLeavePrimaryAndAliases,
   isStaffUnavailableDueToApprovedLeave,
+  staffUidAliasListForLeave,
   type LeaveRequestLike,
 } from "@/lib/staffLeaveOverlap";
 
@@ -198,6 +200,7 @@ export async function POST(req: NextRequest) {
     // ----- Pre-fetch eligible staff for "Any Staff" services -----
     const hasAnyStaffService = services.some((s: any) => !isValidStaffAssignment(s.staffId));
     let eligibleStaffByService: Record<string, string[]> = {};
+    let staffDirectoryForLeave: Array<{ id: string; uid?: string }> | null = null;
 
     if (hasAnyStaffService) {
       const dayOfWeek = getDayOfWeek(dateStr);
@@ -214,6 +217,7 @@ export async function POST(req: NextRequest) {
       ]);
 
       const allStaff = (staffSnapshot.docs || []).map((d: any) => ({ id: d.id, ...d.data() }));
+      staffDirectoryForLeave = allStaff;
       const allServicesData = (servicesSnapshot.docs || []).map((d: any) => ({ id: d.id, ...d.data() }));
 
       for (const svc of services) {
@@ -247,7 +251,8 @@ export async function POST(req: NextRequest) {
               dateStr,
               svcStartMin,
               svcDur,
-              branchTz
+              branchTz,
+              staffUidAliasListForLeave(st)
             )
           ) {
             return false;
@@ -272,6 +277,19 @@ export async function POST(req: NextRequest) {
       }
     }
 
+    if (
+      !staffDirectoryForLeave &&
+      approvedLeaves.length > 0 &&
+      services.some((s: any) => isValidStaffAssignment(s.staffId))
+    ) {
+      const staffSnapshot = await db
+        .collection("users")
+        .where("ownerUid", "==", String(ownerUid))
+        .get()
+        .catch(() => ({ docs: [] as any[] }));
+      staffDirectoryForLeave = (staffSnapshot.docs || []).map((d: any) => ({ id: d.id, ...d.data() }));
+    }
+
     // Check each service for conflicts
     for (const newSvc of services) {
       const newStart = timeToMinutes(newSvc.time);
@@ -280,16 +298,22 @@ export async function POST(req: NextRequest) {
       const newStaffId = newSvc.staffId || null;
       const hasSpecificStaff = isValidStaffAssignment(newStaffId);
 
+      const leaveStaffMatchSvc = findStaffLeavePrimaryAndAliases(
+        staffDirectoryForLeave || [],
+        String(newStaffId || "")
+      );
+
       if (
         hasSpecificStaff &&
         newStaffId &&
         isStaffUnavailableDueToApprovedLeave(
           approvedLeaves,
-          String(newStaffId),
+          leaveStaffMatchSvc.primaryId,
           dateStr,
           newStart,
           newDur,
-          branchTz
+          branchTz,
+          leaveStaffMatchSvc.aliases
         )
       ) {
         return NextResponse.json(

@@ -10,7 +10,9 @@ import { validateOwnerUid } from "@/lib/ownerValidation";
 import { sendBookingRequestReceivedEmail } from "@/lib/emailService";
 import {
   filterApprovedLeaves,
+  findStaffLeavePrimaryAndAliases,
   isStaffUnavailableDueToApprovedLeave,
+  staffUidAliasListForLeave,
   type LeaveRequestLike,
 } from "@/lib/staffLeaveOverlap";
 
@@ -663,6 +665,7 @@ export async function POST(req: NextRequest) {
       // (not just if any single booking conflicts). Pre-fetch staff/service data if needed.
       const hasAnyStaffService = servicesToCheck.some(s => !isValidStaffAssignment(s.staffId || body.staffId));
       let eligibleStaffByService: Record<string, string[]> = {};
+      let staffDirectoryForLeave: Array<{ id: string; uid?: string }> | null = null;
 
       if (hasAnyStaffService) {
         const dayOfWeek = getDayOfWeek(dateStr);
@@ -680,6 +683,7 @@ export async function POST(req: NextRequest) {
         ]);
 
         const allStaff = (staffSnapshot.docs || []).map((d: any) => ({ id: d.id, ...d.data() }));
+        staffDirectoryForLeave = allStaff;
         const allServices = (servicesSnapshot.docs || []).map((d: any) => ({ id: d.id, ...d.data() }));
 
         for (const svc of servicesToCheck) {
@@ -719,7 +723,8 @@ export async function POST(req: NextRequest) {
                 dateStr,
                 svcStartMin,
                 svcDur,
-                branchTz
+                branchTz,
+                staffUidAliasListForLeave(st)
               )
             ) {
               return false;
@@ -744,6 +749,19 @@ export async function POST(req: NextRequest) {
         }
       }
 
+      if (
+        !staffDirectoryForLeave &&
+        approvedLeaves.length > 0 &&
+        servicesToCheck.some((s) => isValidStaffAssignment(s.staffId || body.staffId))
+      ) {
+        const staffSnapshot = await db
+          .collection("users")
+          .where("ownerUid", "==", String(body.ownerUid))
+          .get()
+          .catch(() => ({ docs: [] as any[] }));
+        staffDirectoryForLeave = (staffSnapshot.docs || []).map((d: any) => ({ id: d.id, ...d.data() }));
+      }
+
       for (const newService of servicesToCheck) {
         const newServiceTime = newService.time || body.time;
         const newServiceDuration = newService.duration || body.duration;
@@ -755,16 +773,22 @@ export async function POST(req: NextRequest) {
         const newEndMinutes = newStartMinutes + newServiceDuration;
         const newHasStaff = isValidStaffAssignment(newServiceStaffId);
 
+        const leaveStaffMatch = findStaffLeavePrimaryAndAliases(
+          staffDirectoryForLeave || [],
+          String(newServiceStaffId || "")
+        );
+
         if (
           newHasStaff &&
           newServiceStaffId &&
           isStaffUnavailableDueToApprovedLeave(
             approvedLeaves,
-            String(newServiceStaffId),
+            leaveStaffMatch.primaryId,
             dateStr,
             newStartMinutes,
             newServiceDuration,
-            branchTz
+            branchTz,
+            leaveStaffMatch.aliases
           )
         ) {
           return NextResponse.json(
@@ -976,16 +1000,22 @@ export async function POST(req: NextRequest) {
         const newEndMinutes = newStartMinutes + newServiceDuration;
         const newHasStaff = isValidStaffAssignment(newServiceStaffId);
 
+        const leaveStaffMatchHold = findStaffLeavePrimaryAndAliases(
+          staffDirectoryForLeave || [],
+          String(newServiceStaffId || "")
+        );
+
         if (
           newHasStaff &&
           newServiceStaffId &&
           isStaffUnavailableDueToApprovedLeave(
             approvedLeaves,
-            String(newServiceStaffId),
+            leaveStaffMatchHold.primaryId,
             dateStr,
             newStartMinutes,
             newServiceDuration,
-            branchTz
+            branchTz,
+            leaveStaffMatchHold.aliases
           )
         ) {
           return NextResponse.json(

@@ -75,18 +75,77 @@ export function filterApprovedLeaves(rows: LeaveRequestLike[]): LeaveRequestLike
   return rows.filter((r) => String(r.status ?? "").trim().toLowerCase() === "approved");
 }
 
+function staffCandidateIdSet(primaryId: string, aliases?: readonly string[]): Set<string> {
+  const set = new Set<string>();
+  const p = String(primaryId ?? "").trim();
+  if (p) set.add(p);
+  for (const a of aliases ?? []) {
+    const t = String(a ?? "").trim();
+    if (t) set.add(t);
+  }
+  return set;
+}
+
+function leaveRequesterMatchesStaff(requesterUid: unknown, candidates: Set<string>): boolean {
+  const req = String(requesterUid ?? "").trim();
+  return req !== "" && candidates.has(req);
+}
+
+/** When `users` doc id differs from stored Firebase `uid`, leave rows still use `requesterUid` from auth. */
+export function staffUidAliasListForLeave(st: { id?: string; uid?: string } | null | undefined): string[] {
+  if (!st) return [];
+  const id = String(st.id ?? "").trim();
+  const u = String((st as { uid?: string }).uid ?? "").trim();
+  if (u && u !== id) return [u];
+  return [];
+}
+
+export function findStaffLeavePrimaryAndAliases(
+  allStaff: Array<{ id?: string; uid?: string }>,
+  idFromClient: string
+): { primaryId: string; aliases: string[] } {
+  const key = String(idFromClient);
+  const st = allStaff.find(
+    (x) => String(x.id) === key || String((x as { uid?: string }).uid || "") === key
+  );
+  if (!st) return { primaryId: key, aliases: [] };
+  return { primaryId: String(st.id), aliases: staffUidAliasListForLeave(st) };
+}
+
+/**
+ * Hide stylist chip when approved leave is full-day (default) for that wall date.
+ * Partial-day leave keeps the chip; per-slot overlap still blocks times.
+ */
+export function hideStaffChipForApprovedLeaveOnDate(
+  approvedLeaves: LeaveRequestLike[],
+  staffPrimaryId: string,
+  staffIdAliases: readonly string[] | undefined,
+  bookingYmd: string,
+  branchTz: string
+): boolean {
+  const candidates = staffCandidateIdSet(staffPrimaryId, staffIdAliases);
+  for (const row of approvedLeaves) {
+    if (!leaveRequesterMatchesStaff(row.requesterUid, candidates)) continue;
+    if (String(row.status ?? "").trim().toLowerCase() !== "approved") continue;
+    if (row.isFullDay === false) continue;
+    if (approvedLeaveBlocksBookingSlot(row, bookingYmd, 0, 24 * 60, branchTz)) return true;
+  }
+  return false;
+}
+
 export function isStaffUnavailableDueToApprovedLeave(
   approvedLeaves: LeaveRequestLike[],
   staffUid: string,
   bookingYmd: string,
   bookingStartMinutes: number,
   bookingDurationMinutes: number,
-  branchTz: string
+  branchTz: string,
+  staffIdAliases?: readonly string[]
 ): boolean {
-  const staff = String(staffUid).trim();
+  const candidates = staffCandidateIdSet(staffUid, staffIdAliases);
   const endMin = bookingStartMinutes + bookingDurationMinutes;
   for (const row of approvedLeaves) {
-    if (String(row.requesterUid ?? "").trim() !== staff) continue;
+    if (!leaveRequesterMatchesStaff(row.requesterUid, candidates)) continue;
     const st = String(row.status ?? "").trim().toLowerCase();
     if (st !== "approved") continue;
     if (approvedLeaveBlocksBookingSlot(row, bookingYmd, bookingStartMinutes, endMin, branchTz)) return true;
