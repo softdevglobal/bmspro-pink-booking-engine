@@ -8,6 +8,11 @@ import { shouldBlockSlots } from "@/lib/bookingTypes";
 import { checkRateLimit, getClientIdentifier, RateLimiters } from "@/lib/rateLimiter";
 import { validateOwnerUid } from "@/lib/ownerValidation";
 import { sendBookingRequestReceivedEmail } from "@/lib/emailService";
+import {
+  filterApprovedLeaves,
+  isStaffUnavailableDueToApprovedLeave,
+  type LeaveRequestLike,
+} from "@/lib/staffLeaveOverlap";
 
 /**
  * Check if a staff ID is a valid assigned staff (not "Any Available" or empty)
@@ -575,6 +580,12 @@ export async function POST(req: NextRequest) {
     // Validate that the requested time slots are not already booked
     const db = adminDb();
     const dateStr = String(body.date);
+
+    let branchTz = "Australia/Sydney";
+    try {
+      const branchDoc = await db.collection("branches").doc(String(body.branchId)).get();
+      branchTz = String(branchDoc.exists ? (branchDoc.data() as { timezone?: string })?.timezone || "Australia/Sydney" : "Australia/Sydney");
+    } catch {}
     
     // Helper function to check if two time ranges overlap
     const timeRangesOverlap = (
@@ -616,11 +627,21 @@ export async function POST(req: NextRequest) {
         .where("date", "==", dateStr)
         .where("status", "==", "active");
 
-      const [bookingsSnapshot, bookingRequestsSnapshot, slotHoldsSnapshot] = await Promise.all([
+      const leaveRequestsQuery = db.collection("leaveRequests").where("ownerUid", "==", String(body.ownerUid));
+
+      const [bookingsSnapshot, bookingRequestsSnapshot, slotHoldsSnapshot, leaveSnapshot] = await Promise.all([
         bookingsQuery.get().catch(() => ({ docs: [] })),
         bookingRequestsQuery.get().catch(() => ({ docs: [] })),
         slotHoldsQuery.get().catch(() => ({ docs: [] as any[] })),
+        leaveRequestsQuery.get().catch(() => ({ docs: [] as any[] })),
       ]);
+
+      const approvedLeaves: LeaveRequestLike[] = filterApprovedLeaves(
+        leaveSnapshot.docs.map((doc: { id: string; data: () => Record<string, unknown> }) => ({
+          id: doc.id,
+          ...doc.data(),
+        })) as LeaveRequestLike[]
+      );
 
       // Combine results from both collections
       const allExistingBookings: Array<any> = [
@@ -667,6 +688,13 @@ export async function POST(req: NextRequest) {
 
           const serviceId = svc.id || svc.serviceId || body.serviceId;
           const serviceData = allServices.find((s: any) => String(s.id) === String(serviceId));
+          const svcTimeStr = String(svc.time || body.time || "");
+          const svcDur = Number(svc.duration || body.duration || 60);
+          const svcStartMin = (() => {
+            const parts = svcTimeStr.split(":").map(Number);
+            if (parts.length < 2) return 0;
+            return parts[0] * 60 + parts[1];
+          })();
 
           const eligible = allStaff.filter((st: any) => {
             const role = (st.role || "").toString().toLowerCase();
@@ -682,8 +710,34 @@ export async function POST(req: NextRequest) {
             }
 
             // Check branch assignment (weeklySchedule + primary branchId)
-            return isStaffAssignedToBranch(st, String(body.branchId), dayOfWeek);
+            if (!isStaffAssignedToBranch(st, String(body.branchId), dayOfWeek)) return false;
+
+            if (
+              isStaffUnavailableDueToApprovedLeave(
+                approvedLeaves,
+                String(st.id),
+                dateStr,
+                svcStartMin,
+                svcDur,
+                branchTz
+              )
+            ) {
+              return false;
+            }
+
+            return true;
           });
+
+          if (eligible.length === 0) {
+            return NextResponse.json(
+              {
+                error: "No staff available",
+                details:
+                  "No eligible staff for this service, date, and time (includes approved leave). Choose another time.",
+              },
+              { status: 409 }
+            );
+          }
 
           eligibleStaffByService[String(serviceId)] = eligible.map((s: any) => s.id);
           console.log(`[BOOKING REQUEST] Service ${serviceId}: ${eligible.length} eligible staff [${eligible.map((s: any) => s.id).join(', ')}] (day=${dayOfWeek})`);
@@ -700,6 +754,27 @@ export async function POST(req: NextRequest) {
         const newStartMinutes = timeToMinutes(newServiceTime);
         const newEndMinutes = newStartMinutes + newServiceDuration;
         const newHasStaff = isValidStaffAssignment(newServiceStaffId);
+
+        if (
+          newHasStaff &&
+          newServiceStaffId &&
+          isStaffUnavailableDueToApprovedLeave(
+            approvedLeaves,
+            String(newServiceStaffId),
+            dateStr,
+            newStartMinutes,
+            newServiceDuration,
+            branchTz
+          )
+        ) {
+          return NextResponse.json(
+            {
+              error: "Staff on leave",
+              details: "This staff member has approved leave during the selected date and time.",
+            },
+            { status: 409 }
+          );
+        }
 
         if (!newHasStaff) {
           // ── "Any Staff" mode ──
@@ -900,6 +975,27 @@ export async function POST(req: NextRequest) {
         const newStartMinutes = timeToMinutes(newServiceTime);
         const newEndMinutes = newStartMinutes + newServiceDuration;
         const newHasStaff = isValidStaffAssignment(newServiceStaffId);
+
+        if (
+          newHasStaff &&
+          newServiceStaffId &&
+          isStaffUnavailableDueToApprovedLeave(
+            approvedLeaves,
+            String(newServiceStaffId),
+            dateStr,
+            newStartMinutes,
+            newServiceDuration,
+            branchTz
+          )
+        ) {
+          return NextResponse.json(
+            {
+              error: "Staff on leave",
+              details: "This staff member has approved leave during the selected date and time.",
+            },
+            { status: 409 }
+          );
+        }
 
         if (!newHasStaff) {
           // ── "Any Staff" mode: use pool model for holds ──

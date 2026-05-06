@@ -1,7 +1,11 @@
 import { NextRequest, NextResponse } from "next/server";
 import { adminDb } from "@/lib/firebaseAdmin";
-import { FieldValue } from "firebase-admin/firestore";
 import { shouldBlockSlots } from "@/lib/bookingTypes";
+import {
+  filterApprovedLeaves,
+  isStaffUnavailableDueToApprovedLeave,
+  type LeaveRequestLike,
+} from "@/lib/staffLeaveOverlap";
 
 export const runtime = "nodejs";
 
@@ -117,6 +121,17 @@ export async function POST(req: NextRequest) {
     const db = adminDb();
     const now = Date.now();
     const expiresAt = now + HOLD_DURATION_SECONDS * 1000;
+    const dateStr = String(date);
+
+    let branchTz = "Australia/Sydney";
+    try {
+      const branchDoc = await db.collection("branches").doc(String(branchId)).get();
+      branchTz = String(
+        branchDoc.exists ? (branchDoc.data() as { timezone?: string })?.timezone || "Australia/Sydney" : "Australia/Sydney"
+      );
+    } catch {
+      /* default */
+    }
 
     // --- Abuse prevention: limit holds per session ---
     const existingHoldsQuery = await db.collection("slotHolds")
@@ -139,7 +154,7 @@ export async function POST(req: NextRequest) {
 
     // --- Check for conflicts with existing bookings and active holds ---
     // Query existing bookings for the same date
-    const [bookingsSnap, bookingRequestsSnap, holdsSnap] = await Promise.all([
+    const [bookingsSnap, bookingRequestsSnap, holdsSnap, leaveSnap] = await Promise.all([
       db.collection("bookings")
         .where("ownerUid", "==", String(ownerUid))
         .where("date", "==", String(date))
@@ -156,7 +171,18 @@ export async function POST(req: NextRequest) {
         .where("status", "==", "active")
         .get()
         .catch(() => ({ docs: [] as any[] })),
+      db.collection("leaveRequests")
+        .where("ownerUid", "==", String(ownerUid))
+        .get()
+        .catch(() => ({ docs: [] as any[] })),
     ]);
+
+    const approvedLeaves: LeaveRequestLike[] = filterApprovedLeaves(
+      leaveSnap.docs.map((doc: { id: string; data: () => Record<string, unknown> }) => ({
+        id: doc.id,
+        ...doc.data(),
+      })) as LeaveRequestLike[]
+    );
 
     // Combine bookings
     const allBookings = [
@@ -174,7 +200,7 @@ export async function POST(req: NextRequest) {
     let eligibleStaffByService: Record<string, string[]> = {};
 
     if (hasAnyStaffService) {
-      const dayOfWeek = getDayOfWeek(String(date));
+      const dayOfWeek = getDayOfWeek(dateStr);
 
       const [staffSnapshot, servicesSnapshot] = await Promise.all([
         db.collection("users")
@@ -195,6 +221,8 @@ export async function POST(req: NextRequest) {
 
         const serviceId = svc.serviceId;
         const serviceData = allServicesData.find((s: any) => String(s.id) === String(serviceId));
+        const svcDur = Number(svc.duration || 60);
+        const svcStartMin = timeToMinutes(String(svc.time || ""));
 
         const eligible = allStaff.filter((st: any) => {
           const role = (st.role || "").toString().toLowerCase();
@@ -210,8 +238,34 @@ export async function POST(req: NextRequest) {
           }
 
           // Check branch assignment (weeklySchedule + primary branchId)
-          return isStaffAssignedToBranch(st, String(branchId), dayOfWeek);
+          if (!isStaffAssignedToBranch(st, String(branchId), dayOfWeek)) return false;
+
+          if (
+            isStaffUnavailableDueToApprovedLeave(
+              approvedLeaves,
+              String(st.id),
+              dateStr,
+              svcStartMin,
+              svcDur,
+              branchTz
+            )
+          ) {
+            return false;
+          }
+
+          return true;
         });
+
+        if (eligible.length === 0) {
+          return NextResponse.json(
+            {
+              error: "No staff available",
+              details:
+                "No eligible staff for this service at the selected date and time (includes approved leave). Choose another time.",
+            },
+            { status: 409 }
+          );
+        }
 
         eligibleStaffByService[String(serviceId)] = eligible.map((s: any) => s.id);
         console.log(`[SLOT HOLD] Service ${serviceId}: ${eligible.length} eligible staff [${eligible.map((s: any) => s.id).join(', ')}] (day=${dayOfWeek})`);
@@ -221,9 +275,31 @@ export async function POST(req: NextRequest) {
     // Check each service for conflicts
     for (const newSvc of services) {
       const newStart = timeToMinutes(newSvc.time);
-      const newEnd = newStart + (newSvc.duration || 60);
+      const newDur = newSvc.duration || 60;
+      const newEnd = newStart + newDur;
       const newStaffId = newSvc.staffId || null;
       const hasSpecificStaff = isValidStaffAssignment(newStaffId);
+
+      if (
+        hasSpecificStaff &&
+        newStaffId &&
+        isStaffUnavailableDueToApprovedLeave(
+          approvedLeaves,
+          String(newStaffId),
+          dateStr,
+          newStart,
+          newDur,
+          branchTz
+        )
+      ) {
+        return NextResponse.json(
+          {
+            error: "Staff on leave",
+            details: "This staff member has approved leave during the selected date and time.",
+          },
+          { status: 409 }
+        );
+      }
 
       if (!hasSpecificStaff) {
         // ── "Any Staff" mode ──
