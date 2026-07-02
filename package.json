@@ -9,7 +9,8 @@
     "lint": "eslint"
   },
   "dependencies": {
-    "@sendgrid/mail": "^8.1.6",
+    "server-only": "^0.0.1",
+    "zeptomail": "^6.2.1",
     "date-fns": "^4.1.0",
     "date-fns-tz": "^3.2.0",
     "firebase": "^11.10.0",
