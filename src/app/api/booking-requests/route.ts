@@ -8,6 +8,7 @@ import { shouldBlockSlots } from "@/lib/bookingTypes";
 import { checkRateLimit, getClientIdentifier, RateLimiters } from "@/lib/rateLimiter";
 import { validateOwnerUid } from "@/lib/ownerValidation";
 import { sendBookingRequestReceivedEmail } from "@/lib/emailService";
+import { sendBookingSms } from "@/lib/smsService";
 
 /**
  * Check if a staff ID is a valid assigned staff (not "Any Available" or empty)
@@ -1197,6 +1198,24 @@ export async function POST(req: NextRequest) {
     } catch (emailError) {
       console.error("Failed to send booking request received email:", emailError);
       // Don't fail the request if email sending fails
+    }
+
+    // Send SMS to customer (Request Received) — charges one credit to the
+    // workshop owner via users/{ownerUid}.smsMessagesUsed. Best-effort.
+    try {
+      await sendBookingSms({
+        bookingCode,
+        customerPhone: body.clientPhone || null,
+        customerName: String(body.client),
+        status: "Pending",
+        ownerUid: String(body.ownerUid),
+        bookingDate: String(body.date),
+        bookingTime: String(body.time),
+        serviceName: body.serviceName || null,
+      });
+    } catch (smsError) {
+      console.error("Failed to send booking request received SMS:", smsError);
+      // Don't fail the request if SMS sending fails
     }
     
     // Create notification for the customer (booking received)
