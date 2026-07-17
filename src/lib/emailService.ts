@@ -1,44 +1,12 @@
-import sgMail from "@sendgrid/mail";
 import { adminDb } from "./firebaseAdmin";
 import { FieldValue } from "firebase-admin/firestore";
 import type { BookingStatus } from "./bookingTypes";
+import { dispatchMail, isZeptoMailConfigured } from "./zeptomail";
 
-// Initialize SendGrid
-let SENDGRID_API_KEY = process.env.SENDGRID_API_KEY;
-const FROM_EMAIL = process.env.FROM_EMAIL || "noreply@bmspros.com.au";
-
-/**
- * Ensure SendGrid is initialized with API key
- * This function checks and initializes SendGrid at runtime
- */
-function ensureSendGridInitialized(): boolean {
-  // Re-check environment variable in case it was set after module load
-  if (!SENDGRID_API_KEY || SENDGRID_API_KEY.trim() === "") {
-    SENDGRID_API_KEY = process.env.SENDGRID_API_KEY;
-  }
-  
-  if (SENDGRID_API_KEY && SENDGRID_API_KEY.trim()) {
-    try {
-      sgMail.setApiKey(SENDGRID_API_KEY.trim());
-      return true;
-    } catch (error) {
-      console.error("[EMAIL] Failed to set SendGrid API key:", error);
-      return false;
-    }
-  }
-  
-  return false;
-}
-
-// Initialize SendGrid API key if available at module load
-if (SENDGRID_API_KEY && SENDGRID_API_KEY.trim()) {
-  sgMail.setApiKey(SENDGRID_API_KEY.trim());
-  console.log("[EMAIL] ✅ SendGrid initialized successfully");
-} else {
-  console.warn("[EMAIL] ⚠️  SendGrid API key not found in environment variables");
-  console.warn("[EMAIL] Please set SENDGRID_API_KEY in your .env.local file");
-  console.warn("[EMAIL] Example: SENDGRID_API_KEY=SG.your-api-key-here");
-}
+const REQUEST_FROM_EMAIL =
+  process.env.ZEPTOMAIL_REQUEST_FROM_ADDRESS || "request@bmspros.com.au";
+const ADMIN_FROM_EMAIL =
+  process.env.ZEPTOMAIL_SYSTEM_FROM_ADDRESS || "noreply@bmspros.com.au";
 
 /**
  * Get salon name from ownerUid
@@ -444,11 +412,9 @@ export async function sendBookingEmail(data: BookingEmailData): Promise<{ succes
     return { success: false, error: "Email already sent for this status" };
   }
   
-  // Ensure SendGrid is initialized
-  if (!ensureSendGridInitialized()) {
-    console.error(`[EMAIL] SendGrid API key not configured!`);
-    console.error(`[EMAIL] Please set SENDGRID_API_KEY in your .env.local file`);
-    return { success: false, error: "SendGrid API key not configured. Please contact support." };
+  if (!isZeptoMailConfigured()) {
+    console.error(`[EMAIL] ZeptoMail is not configured!`);
+    return { success: false, error: "ZeptoMail is not configured. Please contact support." };
   }
   
   try {
@@ -465,21 +431,23 @@ export async function sendBookingEmail(data: BookingEmailData): Promise<{ succes
     
     const msg = {
       to: email,
-      from: FROM_EMAIL,
+      from: REQUEST_FROM_EMAIL,
+      replyTo: REQUEST_FROM_EMAIL,
       subject: subject,
       html: html,
     };
-    
-    console.log(`[EMAIL] Sending email via SendGrid:`, {
+
+    console.log(`[EMAIL] Sending email via ZeptoMail:`, {
       to: email,
-      from: FROM_EMAIL,
+      from: REQUEST_FROM_EMAIL,
+      replyTo: REQUEST_FROM_EMAIL,
       subject: subject,
       bookingId: data.bookingId,
       status: data.status,
       salonName: salonName,
     });
     
-    await sgMail.send(msg);
+    await dispatchMail(msg);
     
     // Log that email was sent
     await logEmailSent(data.bookingId, data.status, email);
@@ -494,7 +462,7 @@ export async function sendBookingEmail(data: BookingEmailData): Promise<{ succes
       response: error?.response?.body,
       statusCode: error?.response?.statusCode,
     });
-    const errorMessage = error?.response?.body?.errors?.[0]?.message || error?.message || "Unknown error";
+    const errorMessage = error?.message || "Unknown error";
     return { success: false, error: errorMessage };
   }
 }
@@ -741,11 +709,9 @@ export async function sendPasswordResetEmail(
     return { success: false, error: "Invalid email address" };
   }
   
-  // Ensure SendGrid is initialized
-  if (!ensureSendGridInitialized()) {
-    console.error(`[EMAIL] SendGrid API key not configured!`);
-    console.error(`[EMAIL] Please set SENDGRID_API_KEY in your .env.local file`);
-    return { success: false, error: "SendGrid API key not configured. Please contact support." };
+  if (!isZeptoMailConfigured()) {
+    console.error(`[EMAIL] ZeptoMail is not configured!`);
+    return { success: false, error: "ZeptoMail is not configured. Please contact support." };
   }
   
   try {
@@ -754,23 +720,18 @@ export async function sendPasswordResetEmail(
     
     const msg = {
       to: emailAddress,
-      from: FROM_EMAIL,
+      from: ADMIN_FROM_EMAIL,
       subject: subject,
       html: html,
-      trackingSettings: {
-        clickTracking: {
-          enable: false, // Disable click tracking so links go directly to destination
-        },
-      },
     };
-    
-    console.log(`[EMAIL] Sending password reset email via SendGrid:`, {
+
+    console.log(`[EMAIL] Sending password reset email via ZeptoMail:`, {
       to: emailAddress,
-      from: FROM_EMAIL,
+      from: ADMIN_FROM_EMAIL,
       subject: subject,
     });
     
-    await sgMail.send(msg);
+    await dispatchMail(msg);
     
     console.log(`[EMAIL] ✅ Password reset email sent successfully to ${emailAddress}`);
     return { success: true };
@@ -782,7 +743,7 @@ export async function sendPasswordResetEmail(
       response: error?.response?.body,
       statusCode: error?.response?.statusCode,
     });
-    const errorMessage = error?.response?.body?.errors?.[0]?.message || error?.message || "Unknown error";
+    const errorMessage = error?.message || "Unknown error";
     return { success: false, error: errorMessage };
   }
 }
@@ -888,11 +849,9 @@ export async function sendWelcomeEmail(
     return { success: false, error: "Invalid email address" };
   }
   
-  // Ensure SendGrid is initialized
-  if (!ensureSendGridInitialized()) {
-    console.error(`[EMAIL] SendGrid API key not configured!`);
-    console.error(`[EMAIL] Please set SENDGRID_API_KEY in your .env.local file`);
-    return { success: false, error: "SendGrid API key not configured. Please contact support." };
+  if (!isZeptoMailConfigured()) {
+    console.error(`[EMAIL] ZeptoMail is not configured!`);
+    return { success: false, error: "ZeptoMail is not configured. Please contact support." };
   }
   
   try {
@@ -904,24 +863,21 @@ export async function sendWelcomeEmail(
     
     const msg = {
       to: emailAddress,
-      from: FROM_EMAIL,
+      from: REQUEST_FROM_EMAIL,
+      replyTo: REQUEST_FROM_EMAIL,
       subject: subject,
       html: html,
-      trackingSettings: {
-        clickTracking: {
-          enable: false, // Disable click tracking so links go directly to destination
-        },
-      },
     };
-    
-    console.log(`[EMAIL] Sending welcome email via SendGrid:`, {
+
+    console.log(`[EMAIL] Sending welcome email via ZeptoMail:`, {
       to: emailAddress,
-      from: FROM_EMAIL,
+      from: REQUEST_FROM_EMAIL,
+      replyTo: REQUEST_FROM_EMAIL,
       subject: subject,
       salonName: salonName,
     });
     
-    await sgMail.send(msg);
+    await dispatchMail(msg);
     
     console.log(`[EMAIL] ✅ Welcome email sent successfully to ${emailAddress}`);
     return { success: true };
@@ -933,7 +889,7 @@ export async function sendWelcomeEmail(
       response: error?.response?.body,
       statusCode: error?.response?.statusCode,
     });
-    const errorMessage = error?.response?.body?.errors?.[0]?.message || error?.message || "Unknown error";
+    const errorMessage = error?.message || "Unknown error";
     return { success: false, error: errorMessage };
   }
 }
